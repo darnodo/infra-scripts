@@ -21,7 +21,3 @@ These scripts automate the deployment of personal infrastructure components. The
 - Fresh Debian 11/12 installation
 - User with sudo privileges (do not run as root)
 - Internet access
-
-## License
-
-MIT
