@@ -68,7 +68,7 @@ main() {
 
     log_info "Installing base packages..."
     sudo apt update -qq
-    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common > /dev/null
+    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common at > /dev/null
 
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
@@ -140,7 +140,17 @@ EOF
     sudo ufw allow ${PEER_PORT}/udp > /dev/null
     # Allow all traffic on Tailscale interface
     sudo ufw allow in on tailscale0 > /dev/null
+    # Temporarily allow SSH during setup (safety net)
+    sudo ufw allow 22/tcp > /dev/null
     sudo ufw --force enable > /dev/null
+
+    # Schedule SSH rule removal in 5 minutes
+    log_warn "SSH port 22 temporarily open for 5 minutes (safety net)."
+    log_warn "Verify Tailscale SSH access works, then wait or run: sudo ufw delete allow 22/tcp"
+    echo "sudo ufw delete allow 22/tcp && logger 'UFW: SSH port 22 closed by scheduled task'" | sudo at now + 5 minutes 2>/dev/null || {
+        log_warn "Could not schedule automatic SSH cleanup. Run manually after verification:"
+        log_warn "  sudo ufw delete allow 22/tcp"
+    }
 
     log_info "Configuring MOTD..."
     sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
@@ -187,6 +197,9 @@ MOTD
     echo "  Mount    : ${NFS_MOUNT}"
     echo ""
     echo "Peer port  : ${PEER_PORT} (public)"
+    echo ""
+    log_warn "SSH port 22 will be closed in 5 minutes."
+    log_warn "To cancel: sudo atq (list jobs) then sudo atrm <job-number>"
     echo ""
     echo "Save these credentials! The password was auto-generated."
     echo ""
