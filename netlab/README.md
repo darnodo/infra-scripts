@@ -40,12 +40,28 @@ NETLAB_HOSTNAME=clab01 SSH_PORT=22222 curl -fsSL https://gitea.arnodo.fr/Damien/
 ## What it does
 
 1. Sets hostname
-2. Installs base packages (vim, fail2ban, unattended-upgrades)
+2. Installs base packages (vim, fail2ban, unattended-upgrades, at)
 3. Installs and connects Tailscale
 4. Configures sysctl for networking and containerlab
 5. Installs ContainerLab + Docker (via official setup script)
 6. Configures SSH on custom port
 7. Configures UFW (custom SSH port public, everything else via Tailscale)
+8. Temporarily opens SSH port 22 for 5 minutes (safety net)
+
+## SSH Safety Net
+
+During installation, SSH port 22 is temporarily opened for 5 minutes to prevent lockout if you're connected via public IP on the default port. After 5 minutes, it will be automatically closed. You can then use either the custom SSH port or Tailscale SSH.
+
+```bash
+# List scheduled jobs
+sudo atq
+
+# Cancel the scheduled SSH closure (replace N with job number)
+sudo atrm N
+
+# Manually close SSH port 22 if needed
+sudo ufw delete allow 22/tcp
+```
 
 ## Post-install
 
