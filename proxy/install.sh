@@ -49,7 +49,7 @@ main() {
 
     log_info "Installing base packages..."
     sudo apt update -qq
-    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades > /dev/null
+    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades at > /dev/null
 
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
@@ -78,7 +78,17 @@ main() {
     sudo ufw allow 443/tcp > /dev/null
     # Allow all traffic on Tailscale interface (SSH, admin, etc.)
     sudo ufw allow in on tailscale0 > /dev/null
+    # Temporarily allow SSH during setup (safety net)
+    sudo ufw allow 22/tcp > /dev/null
     sudo ufw --force enable > /dev/null
+
+    # Schedule SSH rule removal in 5 minutes
+    log_warn "SSH port 22 temporarily open for 5 minutes (safety net)."
+    log_warn "Verify Tailscale SSH access works, then wait or run: sudo ufw delete allow 22/tcp"
+    echo "sudo ufw delete allow 22/tcp && logger 'UFW: SSH port 22 closed by scheduled task'" | sudo at now + 5 minutes 2>/dev/null || {
+        log_warn "Could not schedule automatic SSH cleanup. Run manually after verification:"
+        log_warn "  sudo ufw delete allow 22/tcp"
+    }
 
     log_info "Creating NPM stack..."
     mkdir -p "$NPM_DIR"
@@ -120,6 +130,9 @@ EOF
     echo "Default login: admin@example.com / changeme"
     echo ""
     echo "Note: Approve exit-node in Tailscale admin console if needed"
+    echo ""
+    log_warn "SSH port 22 will be closed in 5 minutes."
+    log_warn "To cancel: sudo atq (list jobs) then sudo atrm <job-number>"
     echo ""
 }
 
