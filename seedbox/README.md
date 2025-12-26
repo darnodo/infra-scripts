@@ -52,12 +52,28 @@ curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/
 ## What it does
 
 1. Sets hostname
-2. Installs base packages (vim, fail2ban, unattended-upgrades, nfs-common)
+2. Installs base packages (vim, fail2ban, unattended-upgrades, nfs-common, at)
 3. Installs and connects Tailscale
 4. Installs Docker
 5. Configures NFS mount to NAS (via Tailscale)
 6. Deploys Transmission container
 7. Configures UFW (peer port public, WebUI via Tailscale only)
+8. Temporarily opens SSH port 22 for 5 minutes (safety net)
+
+## SSH Safety Net
+
+During installation, SSH port 22 is temporarily opened for 5 minutes to prevent lockout if you're connected via public IP. After 5 minutes, it will be automatically closed and only Tailscale SSH will work.
+
+```bash
+# List scheduled jobs
+sudo atq
+
+# Cancel the scheduled SSH closure (replace N with job number)
+sudo atrm N
+
+# Manually close SSH port 22 if needed
+sudo ufw delete allow 22/tcp
+```
 
 ## Directory Structure
 
