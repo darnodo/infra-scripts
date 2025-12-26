@@ -16,9 +16,14 @@ These scripts automate the deployment of personal infrastructure components. The
 |--------|-------------|-------|
 | [`proxy/install.sh`](proxy/) | Reverse proxy with Tailscale + Nginx Proxy Manager | `curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/proxy/install.sh \| bash` |
 | [`netlab/install.sh`](netlab/) | Network lab with ContainerLab | `curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/netlab/install.sh \| bash` |
+| [`seedbox/install.sh`](seedbox/) | ISO seedbox with Transmission + NFS | `NFS_SERVER=<nas> curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh \| bash` |
 
 ## Requirements
 
 - Fresh Debian 11/12 installation
 - User with sudo privileges (do not run as root)
 - Internet access
+
+## License
+
+MIT
