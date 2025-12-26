@@ -31,13 +31,29 @@ PROXY_HOSTNAME=myproxy TZ=America/New_York curl -fsSL https://gitea.arnodo.fr/Da
 ## What it does
 
 1. Sets hostname
-2. Installs base packages (vim, fail2ban, unattended-upgrades)
+2. Installs base packages (vim, fail2ban, unattended-upgrades, at)
 3. Installs and connects Tailscale (will prompt for authentication)
 4. Configures sysctl for exit-node capability
 5. Installs Docker
 6. Configures UFW (80/443 public, everything else via Tailscale only)
 7. Deploys Nginx Proxy Manager
 8. Exposes NPM admin panel via Tailscale serve
+9. Temporarily opens SSH port 22 for 5 minutes (safety net)
+
+## SSH Safety Net
+
+During installation, SSH port 22 is temporarily opened for 5 minutes to prevent lockout if you're connected via public IP. After 5 minutes, it will be automatically closed and only Tailscale SSH will work.
+
+```bash
+# List scheduled jobs
+sudo atq
+
+# Cancel the scheduled SSH closure (replace N with job number)
+sudo atrm N
+
+# Manually close SSH port 22 if needed
+sudo ufw delete allow 22/tcp
+```
 
 ## Post-install
 
