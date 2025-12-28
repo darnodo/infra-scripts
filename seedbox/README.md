@@ -1,17 +1,17 @@
 # Seedbox Server
 
-Deploys a seedbox with Transmission for maintaining Linux ISO mirrors.
+Deploys a seedbox with Transmission for maintaining Linux ISO mirrors and OS images.
 
 ## Quick Start
 
 ```bash
-NFS_SERVER=nas.tailnet.ts.net curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh | bash
+NFS_SERVER=nas curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh | bash
 ```
 
 ## Components
 
 - **Transmission**: BitTorrent client with WebUI
-- **NFS v4.1**: Mount to NAS for ISO storage
+- **NFS**: Dual mount to NAS for downloads and media storage
 - **Tailscale**: Private access to WebUI
 - **Docker**: Container runtime
 - **UFW**: Firewall (only peer port exposed publicly)
@@ -22,8 +22,10 @@ NFS_SERVER=nas.tailnet.ts.net curl -fsSL https://gitea.arnodo.fr/Damien/infra-sc
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NFS_SERVER` | *required* | NAS hostname/IP (Tailscale) |
-| `NFS_SHARE` | `/volume1/iso` | NFS export path on NAS |
-| `NFS_MOUNT` | `/mnt/iso` | Local mount point |
+| `NFS_SHARE_DOWNLOAD` | `/volume2/Downloads` | NFS export for downloads |
+| `NFS_SHARE_MEDIA` | `/volume2/Multimédia` | NFS export for media/ISOs |
+| `NFS_MOUNT_DOWNLOAD` | `/mnt/download` | Local mount for downloads |
+| `NFS_MOUNT_MEDIA` | `/mnt/media` | Local mount for media |
 | `SEEDBOX_HOSTNAME` | `seedbox` | Server hostname |
 | `PEER_PORT` | `51413` | BitTorrent peer port |
 | `TRANSMISSION_USER` | `admin` | WebUI username |
@@ -33,10 +35,10 @@ NFS_SERVER=nas.tailnet.ts.net curl -fsSL https://gitea.arnodo.fr/Damien/infra-sc
 Example with custom settings:
 
 ```bash
-NFS_SERVER=nas.tailnet.ts.net \
-NFS_SHARE=/volume1/linux-iso \
+NFS_SERVER=nas \
+NFS_SHARE_DOWNLOAD=/volume1/torrents \
+NFS_SHARE_MEDIA=/volume1/iso \
 TRANSMISSION_USER=damien \
-TRANSMISSION_PASS=mysecurepass \
 curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh | bash
 ```
 
@@ -49,14 +51,41 @@ curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/
 | SSH | ❌ | ✅ Tailscale SSH |
 | NFS (to NAS) | ❌ | ✅ |
 
+## Storage Architecture
+
+```
+NAS (via Tailscale)                    Seedbox LXC (70GB)
+┌─────────────────────┐                ┌─────────────────────┐
+│ /volume2/Downloads  │◄──── NFS ────►│ /mnt/download       │
+│ (incomplete + temp) │                │   └► /downloads     │
+├─────────────────────┤                │      (in container) │
+│ /volume2/Multimédia │◄──── NFS ────►│ /mnt/media          │
+│ (ISOs, VMDK, QCOW)  │                │   └► /media         │
+└─────────────────────┘                │      (in container) │
+                                       └─────────────────────┘
+```
+
+### Transmission Paths
+
+| Container Path | Host Path | NAS Path | Purpose |
+|----------------|-----------|----------|---------|
+| `/downloads` | `/mnt/download` | `/volume2/Downloads` | Incomplete + completed torrents |
+| `/media` | `/mnt/media` | `/volume2/Multimédia` | Final ISOs, VMDK, QCOW images |
+
+### Recommended Workflow
+
+1. Torrents download to `/downloads` (on NAS via NFS)
+2. Once complete, move ISOs to `/media/iso/<distro>/`
+3. Proxmox mounts the same NAS share for VM templates
+
 ## What it does
 
 1. Sets hostname
 2. Installs base packages (vim, fail2ban, unattended-upgrades, nfs-common, at)
 3. Installs and connects Tailscale
 4. Installs Docker
-5. Configures NFS mount to NAS (via Tailscale)
-6. Deploys Transmission container
+5. Configures dual NFS mounts to NAS (same as Proxmox)
+6. Deploys Transmission container with both mounts
 7. Configures UFW (peer port public, WebUI via Tailscale only)
 8. Temporarily opens SSH port 22 for 5 minutes (safety net)
 
@@ -77,30 +106,32 @@ sudo ufw delete allow 22/tcp
 
 ## Directory Structure
 
-Organize your downloads by distribution:
+Organize your media by type:
 
 ```
-/mnt/iso/
-├── debian/
-│   ├── debian-12.7.0-amd64-netinst.iso
-│   └── debian-11.11.0-amd64-netinst.iso
-├── ubuntu/
-│   ├── ubuntu-24.04.1-live-server-amd64.iso
-│   └── ubuntu-22.04.5-live-server-amd64.iso
-├── rhel/
-│   ├── rocky-9.4-x86_64-minimal.iso
-│   └── almalinux-9.4-x86_64-minimal.iso
-└── proxmox/
-    └── proxmox-ve_8.2-1.iso
+/mnt/media/
+├── iso/
+│   ├── debian/
+│   │   └── debian-12.7.0-amd64-netinst.iso
+│   ├── ubuntu/
+│   │   └── ubuntu-24.04.1-live-server-amd64.iso
+│   ├── rhel/
+│   │   └── rocky-9.4-x86_64-minimal.iso
+│   └── proxmox/
+│       └── proxmox-ve_8.2-1.iso
+├── vmdk/
+│   └── windows-server-2022.vmdk
+└── qcow/
+    └── cloud-init-debian-12.qcow2
 ```
 
 ## NAS Configuration (Synology)
 
-Ensure your NAS exports the share via NFS v4.1:
+Ensure your NAS exports both shares via NFS:
 
 1. Control Panel → Shared Folder → Edit → NFS Permissions
-2. Add rule:
-   - Hostname/IP: Tailscale IP of seedbox (e.g., `100.x.x.x`)
+2. For each share (`Downloads` and `Multimédia`), add rule:
+   - Hostname/IP: `*` or Tailscale IP of seedbox (e.g., `100.x.x.x`)
    - Privilege: Read/Write
    - Squash: No mapping
    - Security: sys
@@ -109,12 +140,15 @@ Ensure your NAS exports the share via NFS v4.1:
 ## Post-install
 
 ```bash
-# Check NFS mount
-df -h /mnt/iso
+# Check NFS mounts
+df -h /mnt/download /mnt/media
 
 # View Transmission logs
 cd ~/transmission && docker compose logs -f
 
 # Restart Transmission
 cd ~/transmission && docker compose restart
+
+# Move completed ISO to final location
+mv /mnt/download/debian-12.iso /mnt/media/iso/debian/
 ```
