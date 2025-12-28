@@ -47,8 +47,13 @@ generate_password() {
 
 # Configuration variables (can be overridden via environment)
 HOSTNAME="${SEEDBOX_HOSTNAME:-seedbox}"
-NFS_SHARE="${NFS_SHARE:-/volume1/iso}"
-NFS_MOUNT="${NFS_MOUNT:-/mnt/iso}"
+# NFS shares configuration
+NFS_SHARE_DOWNLOAD="${NFS_SHARE_DOWNLOAD:-/volume2/Downloads}"
+NFS_SHARE_MEDIA="${NFS_SHARE_MEDIA:-/volume2/Multimédia}"
+NFS_MOUNT_DOWNLOAD="${NFS_MOUNT_DOWNLOAD:-/mnt/download}"
+NFS_MOUNT_MEDIA="${NFS_MOUNT_MEDIA:-/mnt/media}"
+# NFS mount options (same as Proxmox)
+NFS_OPTS="defaults,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30s"
 PEER_PORT="${PEER_PORT:-51413}"
 TIMEZONE="${TZ:-Europe/Paris}"
 TRANSMISSION_USER="${TRANSMISSION_USER:-admin}"
@@ -86,15 +91,22 @@ main() {
     log_info "Adding current user to docker group..."
     sudo usermod -aG docker "$USER"
 
-    log_info "Configuring NFS mount: ${NFS_SERVER}:${NFS_SHARE} -> ${NFS_MOUNT}"
-    sudo mkdir -p "$NFS_MOUNT"
+    log_info "Configuring NFS mounts..."
+    sudo mkdir -p "$NFS_MOUNT_DOWNLOAD" "$NFS_MOUNT_MEDIA"
     
-    # Add to fstab if not already present
-    if ! grep -q "${NFS_SERVER}:${NFS_SHARE}" /etc/fstab; then
-        echo "${NFS_SERVER}:${NFS_SHARE} ${NFS_MOUNT} nfs4 rw,soft,intr,timeo=150,retrans=3,_netdev 0 0" | sudo tee -a /etc/fstab > /dev/null
+    # Add download share to fstab if not already present
+    if ! grep -q "${NFS_SERVER}:${NFS_SHARE_DOWNLOAD}" /etc/fstab; then
+        log_info "Adding NFS mount: ${NFS_SERVER}:${NFS_SHARE_DOWNLOAD} -> ${NFS_MOUNT_DOWNLOAD}"
+        echo "${NFS_SERVER}:${NFS_SHARE_DOWNLOAD} ${NFS_MOUNT_DOWNLOAD} nfs ${NFS_OPTS} 0 0" | sudo tee -a /etc/fstab > /dev/null
     fi
     
-    # Mount NFS
+    # Add media share to fstab if not already present
+    if ! grep -q "${NFS_SERVER}:${NFS_SHARE_MEDIA}" /etc/fstab; then
+        log_info "Adding NFS mount: ${NFS_SERVER}:${NFS_SHARE_MEDIA} -> ${NFS_MOUNT_MEDIA}"
+        echo "${NFS_SERVER}:${NFS_SHARE_MEDIA} ${NFS_MOUNT_MEDIA} nfs ${NFS_OPTS} 0 0" | sudo tee -a /etc/fstab > /dev/null
+    fi
+    
+    # Mount NFS shares
     sudo mount -a || log_warn "NFS mount failed - ensure NAS is accessible via Tailscale"
 
     log_info "Creating Transmission stack..."
@@ -117,7 +129,10 @@ services:
       - "${TS_IP}:9091:9091"
     volumes:
       - ./config:/config
-      - ${NFS_MOUNT}:/downloads
+      # Downloads: incomplete and complete torrents
+      - ${NFS_MOUNT_DOWNLOAD}:/downloads
+      # Media: final destination for completed ISOs and images
+      - ${NFS_MOUNT_MEDIA}:/media
     environment:
       - PUID=1000
       - PGID=1000
@@ -172,11 +187,12 @@ echo "  • SSH       : Tailscale only"
 echo "  • Seeding   : Public port ${PEER_PORT}"
 echo ""
 echo "Storage:"
-echo "  • NFS Mount : ${NFS_MOUNT}"
+echo "  • Downloads : ${NFS_MOUNT_DOWNLOAD}"
+echo "  • Media     : ${NFS_MOUNT_MEDIA}"
 echo ""
 echo "Useful commands:"
 echo "  cd ~/transmission && docker compose logs -f"
-echo "  df -h ${NFS_MOUNT}"
+echo "  df -h ${NFS_MOUNT_DOWNLOAD} ${NFS_MOUNT_MEDIA}"
 echo "─────────────────────────────────────────"
 echo ""
 MOTD
@@ -192,9 +208,13 @@ MOTD
     echo "  Username : ${TRANSMISSION_USER}"
     echo "  Password : ${TRANSMISSION_PASS}"
     echo ""
-    echo "Storage:"
-    echo "  NFS      : ${NFS_SERVER}:${NFS_SHARE}"
-    echo "  Mount    : ${NFS_MOUNT}"
+    echo "Storage (NFS mounts):"
+    echo "  Downloads : ${NFS_SERVER}:${NFS_SHARE_DOWNLOAD} -> ${NFS_MOUNT_DOWNLOAD}"
+    echo "  Media     : ${NFS_SERVER}:${NFS_SHARE_MEDIA} -> ${NFS_MOUNT_MEDIA}"
+    echo ""
+    echo "Transmission paths:"
+    echo "  /downloads -> ${NFS_MOUNT_DOWNLOAD} (incomplete + complete torrents)"
+    echo "  /media     -> ${NFS_MOUNT_MEDIA} (final destination for ISOs)"
     echo ""
     echo "Peer port  : ${PEER_PORT} (public)"
     echo ""
