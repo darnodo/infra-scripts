@@ -41,8 +41,9 @@ check_required_vars() {
 }
 
 # Generate random password if not provided
+# Note: uses head -c with || true to avoid SIGPIPE with pipefail
 generate_password() {
-    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16
+    head -c 100 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16 || true
 }
 
 # Configuration variables (can be overridden via environment)
@@ -73,7 +74,7 @@ main() {
 
     log_info "Installing base packages..."
     sudo apt update -qq
-    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common at ufw > /dev/null
+    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common at > /dev/null
 
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
