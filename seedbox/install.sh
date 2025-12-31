@@ -145,7 +145,8 @@ EOF
 
     log_info "Starting Transmission..."
     cd "$TRANSMISSION_DIR"
-    docker compose up -d
+    # Use sg to run docker compose with the new docker group membership
+    sg docker -c "docker compose up -d"
 
     log_info "Configuring UFW firewall..."
     sudo ufw --force reset > /dev/null
