@@ -73,7 +73,7 @@ main() {
 
     log_info "Installing base packages..."
     sudo apt update -qq
-    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common at > /dev/null
+    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common at ufw > /dev/null
 
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
