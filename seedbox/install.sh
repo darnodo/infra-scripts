@@ -113,9 +113,6 @@ main() {
     log_info "Creating Transmission stack..."
     mkdir -p "$TRANSMISSION_DIR"
     
-    # Get Tailscale subnet for whitelist
-    TS_IP=$(tailscale ip -4)
-    
     cat > "$TRANSMISSION_DIR/docker-compose.yml" << EOF
 services:
   transmission:
@@ -126,8 +123,8 @@ services:
       # Peer port - public for seeding
       - "${PEER_PORT}:${PEER_PORT}"
       - "${PEER_PORT}:${PEER_PORT}/udp"
-      # WebUI - bound to Tailscale IP only
-      - "${TS_IP}:9091:9091"
+      # WebUI - bound to localhost only (exposed via tailscale serve)
+      - "127.0.0.1:9091:9091"
     volumes:
       - ./config:/config
       # Downloads: incomplete and complete torrents
@@ -147,6 +144,12 @@ EOF
     cd "$TRANSMISSION_DIR"
     # Use sg to run docker compose with the new docker group membership
     sg docker -c "docker compose up -d"
+
+    log_info "Exposing Transmission WebUI via Tailscale..."
+    sudo tailscale serve --bg http://localhost:9091
+
+    # Get Tailscale hostname for final message
+    TS_HOSTNAME=$(tailscale status --json | grep -o '"DNSName":"[^"]*' | head -1 | cut -d'"' -f4 | sed 's/\.$//')
 
     log_info "Configuring UFW firewall..."
     sudo ufw --force reset > /dev/null
@@ -176,15 +179,15 @@ EOF
 #!/bin/bash
 echo ""
 echo " ____  _____ _____ ____  ____   _____  __"
-echo "/ ___|| ____| ____|  _ \| __ ) / _ \ \\\/ /"
+echo "/ ___|| ____| ____| _ \| __ ) / _ \ \\/ /"
 echo "\___ \|  _| |  _| | | | |  _ \| | | \  /"
-echo " ___) | |___| |___| |_| | |_) | |_| /  \\\\"
-echo "|____/|_____|_____|____/|____/ \___/_/\_\\\\"
+echo " ___) | |___| |___| |_| | |_) | |_| /  \\"
+echo "|____/|_____|_____|____/|____/ \___/_/\_\\"
 echo ""
 echo "ISO Seedbox Server - Transmission"
 echo "─────────────────────────────────────────"
 echo "Access:"
-echo "  • WebUI     : http://\$(tailscale ip -4):9091"
+echo "  • WebUI     : https://\$(tailscale status --json | grep -o '\"DNSName\":\"[^\"]*' | head -1 | cut -d'\"' -f4 | sed 's/\.\$//')"
 echo "  • SSH       : Tailscale only"
 echo "  • Seeding   : Public port ${PEER_PORT}"
 echo ""
@@ -206,7 +209,7 @@ MOTD
     log_info "=========================================="
     echo ""
     echo "Transmission WebUI:"
-    echo "  URL      : http://${TS_IP}:9091"
+    echo "  URL      : https://${TS_HOSTNAME}"
     echo "  Username : ${TRANSMISSION_USER}"
     echo "  Password : ${TRANSMISSION_PASS}"
     echo ""
