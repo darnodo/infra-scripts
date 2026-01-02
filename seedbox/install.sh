@@ -46,12 +46,16 @@ generate_password() {
     head -c 100 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16 || true
 }
 
-# Get Tailscale FQDN hostname
-# Uses tailscale status --json and parses Self.DNSName
+# Get Tailscale FQDN hostname from Self.DNSName
+# Extracts DNSName from the Self object in tailscale status --json
 get_tailscale_hostname() {
     local dns_name
-    # Try to get DNSName from Self object in JSON
-    dns_name=$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName":"\([^"]*\)".*/\1/p' | head -1 | sed 's/\.$//' || true)
+    # Use awk to extract Self.DNSName specifically (not from peers)
+    # Looks for DNSName within the Self block
+    dns_name=$(tailscale status --json 2>/dev/null | awk -F'"' '
+        /"Self"/ { in_self=1 }
+        in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
+    ' || true)
     
     if [[ -z "$dns_name" ]]; then
         # Fallback: use hostname + default tailnet domain hint
@@ -205,8 +209,11 @@ EOF
     
     cat << 'MOTD' | sudo tee /etc/update-motd.d/00-seedbox > /dev/null
 #!/bin/bash
-# Get Tailscale FQDN
-TS_FQDN=$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName":"\([^"]*\)".*/\1/p' | head -1 | sed 's/\.$//')
+# Get Tailscale FQDN from Self.DNSName
+TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
+    /"Self"/ { in_self=1 }
+    in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
+')
 [[ -z "$TS_FQDN" ]] && TS_FQDN="$(hostname).ts.net"
 
 echo ""
