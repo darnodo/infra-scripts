@@ -46,6 +46,21 @@ generate_password() {
     head -c 100 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16 || true
 }
 
+# Get Tailscale FQDN hostname
+# Uses tailscale status --json and parses Self.DNSName
+get_tailscale_hostname() {
+    local dns_name
+    # Try to get DNSName from Self object in JSON
+    dns_name=$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName":"\([^"]*\)".*/\1/p' | head -1 | sed 's/\.$//' || true)
+    
+    if [[ -z "$dns_name" ]]; then
+        # Fallback: use hostname + default tailnet domain hint
+        dns_name="${HOSTNAME}.ts.net"
+        log_warn "Could not determine Tailscale FQDN, using fallback: $dns_name"
+    fi
+    echo "$dns_name"
+}
+
 # Configuration variables (can be overridden via environment)
 HOSTNAME="${SEEDBOX_HOSTNAME:-seedbox}"
 # NFS shares configuration
@@ -162,7 +177,7 @@ EOF
     sudo tailscale serve --bg http://localhost:9091
 
     # Get Tailscale hostname for final message
-    TS_HOSTNAME=$(tailscale status --json | grep -o '"DNSName":"[^"]*' | head -1 | cut -d'"' -f4 | sed 's/\.$//')
+    TS_HOSTNAME=$(get_tailscale_hostname)
 
     log_info "Configuring UFW firewall..."
     sudo ufw --force reset > /dev/null
@@ -188,11 +203,15 @@ EOF
     log_info "Configuring MOTD..."
     sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
     
-    cat << MOTD | sudo tee /etc/update-motd.d/00-seedbox > /dev/null
+    cat << 'MOTD' | sudo tee /etc/update-motd.d/00-seedbox > /dev/null
 #!/bin/bash
+# Get Tailscale FQDN
+TS_FQDN=$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName":"\([^"]*\)".*/\1/p' | head -1 | sed 's/\.$//')
+[[ -z "$TS_FQDN" ]] && TS_FQDN="$(hostname).ts.net"
+
 echo ""
 echo " ____  _____ _____ ____  ____   _____  __"
-echo "/ ___|| ____| ____| _ \| __ ) / _ \ \\/ /"
+echo "/ ___|| ____| ____| _ \| __ ) / _ \ \/ /"
 echo "\___ \|  _| |  _| | | | |  _ \| | | \  /"
 echo " ___) | |___| |___| |_| | |_) | |_| /  \\"
 echo "|____/|_____|_____|____/|____/ \___/_/\_\\"
@@ -200,17 +219,17 @@ echo ""
 echo "ISO Seedbox Server - Transmission"
 echo "─────────────────────────────────────────"
 echo "Access:"
-echo "  • WebUI     : https://\$(tailscale status --json | grep -o '\"DNSName\":\"[^\"]*' | head -1 | cut -d'\"' -f4 | sed 's/\.\$//')"
+echo "  • WebUI     : https://${TS_FQDN}"
 echo "  • SSH       : Tailscale only"
-echo "  • Seeding   : Public port ${PEER_PORT}"
+echo "  • Seeding   : Public port 51413"
 echo ""
 echo "Storage:"
-echo "  • Downloads : ${NFS_MOUNT_DOWNLOAD}"
-echo "  • Media     : ${NFS_MOUNT_MEDIA}"
+echo "  • Downloads : /mnt/download"
+echo "  • Media     : /mnt/media"
 echo ""
 echo "Useful commands:"
 echo "  cd ~/transmission && docker compose logs -f"
-echo "  df -h ${NFS_MOUNT_DOWNLOAD} ${NFS_MOUNT_MEDIA}"
+echo "  df -h /mnt/download /mnt/media"
 echo "─────────────────────────────────────────"
 echo ""
 MOTD
