@@ -73,8 +73,8 @@ main() {
     sudo hostnamectl set-hostname "$HOSTNAME"
 
     log_info "Installing base packages..."
-    sudo apt update -qq
-    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common ufw at > /dev/null
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common ufw at > /dev/null
 
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
@@ -83,11 +83,24 @@ main() {
     sudo tailscale up --ssh
 
     log_info "Installing Docker..."
-    sudo mkdir -m 0755 -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    sudo apt update -qq
-    sudo apt install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin > /dev/null
+    # Use official Docker installation method (DEB822 format)
+    # See: https://docs.docker.com/engine/install/debian/
+    sudo install -m 0755 -d /etc/apt/keyrings
+    sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+    
+    # Add Docker repository using DEB822 format (.sources)
+    # shellcheck disable=SC1091
+    sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin > /dev/null
 
     log_info "Adding current user to docker group..."
     sudo usermod -aG docker "$USER"
