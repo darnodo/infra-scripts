@@ -29,7 +29,7 @@ services:
       - TZ=Europe/Paris
     volumes:
       - config:/config
-      - /srv/seedbox/downloads:/downloads
+      - /downloads:/downloads
       - /mnt/media:/media
     restart: unless-stopped
 
