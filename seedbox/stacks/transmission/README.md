@@ -19,7 +19,7 @@ BitTorrent client with web interface, accessible via Tailscale.
 | Path in container | Host path | Description |
 |-------------------|-----------|-------------|
 | `/config` | Docker volume | Transmission configuration |
-| `/downloads` | `/srv/seedbox/downloads` | Download directory (local SSD) |
+| `/downloads` | `/downloads` | Download directory (local RAID - 3.4T) |
 | `/media` | `/mnt/media` | Media library (NFS) |
 
 ## Configuration
