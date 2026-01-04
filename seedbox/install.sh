@@ -24,7 +24,6 @@ NFS_SHARE_MEDIA="${NFS_SHARE_MEDIA:-/volume2/Multimédia}"
 NFS_MOUNT_MEDIA="${NFS_MOUNT_MEDIA:-/mnt/media}"
 NFS_OPTS="defaults,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30s"
 SEEDBOX_DIR="/srv/seedbox"
-DOWNLOADS_DIR="${SEEDBOX_DIR}/downloads"
 REPO_URL="${REPO_URL:-https://gitea.arnodo.fr/Damien/infra-scripts.git}"
 
 # Pre-flight checks
@@ -142,7 +141,6 @@ EOF
     # Step 8: Create directory structure
     log_info "Creating directory structure..."
     sudo mkdir -p "$SEEDBOX_DIR"
-    sudo mkdir -p "$DOWNLOADS_DIR"
     sudo chown -R "$USER:$USER" "$SEEDBOX_DIR"
 
     # Step 9: Configure NFS mount (if NFS_SERVER provided)
@@ -206,7 +204,7 @@ echo "Services: (via Tailscale)"
 docker ps --format '  • {{.Names}} : {{.Status}}' 2>/dev/null || echo "  Docker not running"
 echo ""
 echo "Storage:"
-echo "  • Downloads  : /srv/seedbox/downloads"
+echo "  • Downloads  : /downloads (local RAID)"
 echo "  • Media      : /mnt/media (NFS)"
 echo ""
 echo "Useful commands:"
@@ -229,8 +227,11 @@ MOTD
     echo "Directory structure:"
     echo "  ${SEEDBOX_DIR}/"
     echo "  ├── stacks/          # Docker Compose stacks"
-    echo "  ├── downloads/       # Local downloads (SSD)"
     echo "  └── .env             # Secrets (created by Gitea Actions)"
+    echo ""
+    echo "Storage:"
+    echo "  • Downloads: /downloads (local RAID - 3.4T)"
+    echo "  • Media:     /mnt/media (NFS)"
     echo ""
     echo "NFS mount:"
     if [[ -n "$NFS_SERVER" ]]; then
