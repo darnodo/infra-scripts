@@ -18,7 +18,7 @@ TV series management and automation.
 | Path in container | Host path | Description |
 |-------------------|-----------|-------------|
 | `/config` | Docker volume | Sonarr configuration |
-| `/downloads` | `/srv/seedbox/downloads` | Download directory |
+| `/downloads` | `/downloads` | Download directory (local RAID) |
 | `/media` | `/mnt/media` | Media library (NFS) |
 
 ## Configuration
