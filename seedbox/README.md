@@ -33,7 +33,7 @@ Docker-based seedbox with Tailscale integration. Each service runs in its own co
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │  Storage:                                                      │
-│  ├─ /srv/seedbox/downloads (local SSD)                        │
+│  ├─ /downloads (local RAID - 3.4T)                            │
 │  └─ /mnt/media (NFS from NAS)                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -88,15 +88,8 @@ Add this tag to your Tailscale ACL policy (https://login.tailscale.com/admin/acl
 ```json
 {
   "tagOwners": {
-    "tag:container": ["autogroup:admin"]
-  },
-  "acls": [
-    {
-      "action": "accept",
-      "src": ["autogroup:member"],
-      "dst": ["tag:container:*"]
-    }
-  ]
+    "tag:container": ["autogroup:admins"]
+  }
 }
 ```
 
@@ -136,11 +129,10 @@ Or create a PR for validation first.
 │   └── portainer/
 │       ├── docker-compose.yml
 │       └── serve.json
-├── downloads/              # Local downloads (SSD)
-├── .env                    # Secrets (created by pipeline)
-└── .gitea/
-    └── workflows/
-        └── deploy.yml      # Deployment pipeline
+└── .env                        # Secrets (created by pipeline)
+
+/downloads/                     # Local RAID storage (3.4T)
+/mnt/media/                     # NFS mount from NAS
 ```
 
 ## Adding a New Service
@@ -185,6 +177,8 @@ services:
       - TZ=Europe/Paris
     volumes:
       - config:/config
+      - /downloads:/downloads
+      - /mnt/media:/media
     restart: unless-stopped
 
 volumes:
@@ -340,6 +334,9 @@ Ensure your NAS exports the media share via NFS:
 ## Post-install Verification
 
 ```bash
+# Check downloads mount
+df -h /downloads
+
 # Check NFS mount
 df -h /mnt/media
 
