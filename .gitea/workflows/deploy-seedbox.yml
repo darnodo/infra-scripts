@@ -51,9 +51,20 @@ jobs:
             set -e
             cd /srv/seedbox
             
-            echo "=== Pulling latest changes ==="
-            git fetch origin main
-            git reset --hard origin/main
+            echo "=== Syncing stacks from repository ==="
+            # Clone to temp directory and sync only seedbox/ content
+            TEMP_DIR=$(mktemp -d)
+            git clone --depth 1 --branch main https://gitea.arnodo.fr/Damien/infra-scripts.git "$TEMP_DIR"
+            
+            # Sync stacks directory (preserve .env and volumes)
+            rsync -av --delete \
+              --exclude='.env' \
+              --exclude='*/data/' \
+              --exclude='*/state/' \
+              "$TEMP_DIR/seedbox/stacks/" /srv/seedbox/stacks/
+            
+            # Clean up temp directory
+            rm -rf "$TEMP_DIR"
             
             echo "=== Creating .env file ==="
             cat > .env << 'ENVEOF'
