@@ -1,214 +1,354 @@
 # Seedbox Server
 
-Deploys a seedbox with Transmission for maintaining Linux ISO mirrors and OS images.
+Docker-based seedbox with Tailscale integration. Each service runs in its own container with a Tailscale sidecar for secure HTTPS access via your tailnet.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         SEEDBOX                                 │
+│                                                                 │
+│  Tailscale Host (SSH only)                                     │
+│  └─► seedbox.taila5ad8.ts.net                                  │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Docker Stacks                                           │   │
+│  │                                                         │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │   │
+│  │  │ Transmission│  │ Prowlarr    │  │ Sonarr      │    │   │
+│  │  │ + ts-sidecar│  │ + ts-sidecar│  │ + ts-sidecar│    │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘    │   │
+│  │        │                │                │             │   │
+│  │        ▼                ▼                ▼             │   │
+│  │   transmission.    prowlarr.        sonarr.           │   │
+│  │   taila5ad8.ts.net taila5ad8.ts.net taila5ad8.ts.net │   │
+│  │                                                         │   │
+│  │  ┌─────────────┐                                       │   │
+│  │  │ Portainer   │  (optional, for monitoring)          │   │
+│  │  │ + ts-sidecar│                                       │   │
+│  │  └─────────────┘                                       │   │
+│  │        │                                                │   │
+│  │        ▼                                                │   │
+│  │   portainer.taila5ad8.ts.net                           │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  Storage:                                                      │
+│  ├─ /srv/seedbox/downloads (local SSD)                        │
+│  └─ /mnt/media (NFS from NAS)                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Quick Start
 
+### 1. Server Installation
+
 ```bash
-NFS_SERVER=nas TRANSMISSION_PASS=MySecureP@ss123 \
+# With NFS mount
+NFS_SERVER=nas curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh | bash
+
+# Without NFS (configure later)
 curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh | bash
 ```
 
-> **⚠️ Important:** Always set `TRANSMISSION_PASS` explicitly. If omitted, a random password is generated and displayed only once at the end of the installation. It cannot be recovered afterward without resetting the config.
+### 2. Configure Gitea Secrets
 
-## Components
+Go to **Gitea > Repository > Settings > Secrets and Variables > Actions** and add:
 
-- **Transmission**: BitTorrent client with WebUI
-- **NFS**: Dual mount to NAS for downloads and media storage
-- **Tailscale**: Private access to WebUI via `tailscale serve`
-- **Docker**: Container runtime
-- **UFW**: Firewall (only peer port exposed publicly)
-- **fail2ban** + **unattended-upgrades**: Basic hardening
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `TS_AUTHKEY` | Tailscale OAuth client secret | `tskey-client-xxxxx-yyyyyyyy` |
+| `SEEDBOX_SSH_KEY` | SSH private key (ed25519) | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+| `TRANSMISSION_USER` | Transmission WebUI username | `admin` |
+| `TRANSMISSION_PASS` | Transmission WebUI password | `your-secure-password` |
 
-## Environment Variables
+#### Creating Tailscale OAuth Client
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NFS_SERVER` | *required* | NAS hostname/IP (Tailscale) |
-| `NFS_SHARE_DOWNLOAD` | `/volume2/Downloads` | NFS export for downloads |
-| `NFS_SHARE_MEDIA` | `/volume2/Multimédia` | NFS export for media/ISOs |
-| `NFS_MOUNT_DOWNLOAD` | `/mnt/download` | Local mount for downloads |
-| `NFS_MOUNT_MEDIA` | `/mnt/media` | Local mount for media |
-| `SEEDBOX_HOSTNAME` | `seedbox` | Server hostname |
-| `PEER_PORT` | `51413` | BitTorrent peer port |
-| `TRANSMISSION_USER` | `admin` | WebUI username |
-| `TRANSMISSION_PASS` | *auto-generated* | WebUI password (⚠️ set explicitly!) |
-| `TZ` | `Europe/Paris` | Timezone |
+1. Go to https://login.tailscale.com/admin/settings/oauth
+2. Click "Generate OAuth Client"
+3. Scopes: `devices:write`
+4. Copy the **Client Secret** (starts with `tskey-client-`)
 
-Example with custom settings:
+#### Creating SSH Deploy Key
 
 ```bash
-NFS_SERVER=nas \
-NFS_SHARE_DOWNLOAD=/volume1/torrents \
-NFS_SHARE_MEDIA=/volume1/iso \
-TRANSMISSION_USER=damien \
-TRANSMISSION_PASS=MySecurePassword \
-curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh | bash
+# Generate key pair
+ssh-keygen -t ed25519 -f seedbox-deploy -N "" -C "gitea-deploy"
+
+# Add public key to seedbox
+ssh debian@seedbox.taila5ad8.ts.net "cat >> ~/.ssh/authorized_keys" < seedbox-deploy.pub
+
+# Copy private key content to Gitea secret SEEDBOX_SSH_KEY
+cat seedbox-deploy
 ```
 
-### Password Recovery
+#### Tailscale ACL Configuration
 
-If you forgot to set `TRANSMISSION_PASS` and lost the auto-generated password:
+Add this tag to your Tailscale ACL policy (https://login.tailscale.com/admin/acls):
+
+```json
+{
+  "tagOwners": {
+    "tag:container": ["autogroup:admin"]
+  },
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["autogroup:member"],
+      "dst": ["tag:container:*"]
+    }
+  ]
+}
+```
+
+### 3. Deploy Services
+
+Push to the `main` branch to trigger deployment:
 
 ```bash
-# Option 1: Check the docker-compose.yml (password in clear text)
-grep PASS ~/transmission/docker-compose.yml
+git push origin main
+```
 
-# Option 2: Reset by editing docker-compose.yml
-cd ~/transmission
-sed -i 's/PASS=.*/PASS=NewPassword/' docker-compose.yml
-docker compose down && docker compose up -d
+Or create a PR for validation first.
+
+## Services
+
+| Service | URL | Port | Description |
+|---------|-----|------|-------------|
+| Transmission | `transmission.taila5ad8.ts.net` | 9091 | BitTorrent client |
+| Prowlarr | `prowlarr.taila5ad8.ts.net` | 9696 | Indexer manager |
+| Sonarr | `sonarr.taila5ad8.ts.net` | 8989 | TV series manager |
+| Portainer | `portainer.taila5ad8.ts.net` | 9000 | Docker management UI |
+
+## Directory Structure
+
+```
+/srv/seedbox/
+├── stacks/
+│   ├── transmission/
+│   │   ├── docker-compose.yml
+│   │   └── serve.json
+│   ├── prowlarr/
+│   │   ├── docker-compose.yml
+│   │   └── serve.json
+│   ├── sonarr/
+│   │   ├── docker-compose.yml
+│   │   └── serve.json
+│   └── portainer/
+│       ├── docker-compose.yml
+│       └── serve.json
+├── downloads/              # Local downloads (SSD)
+├── .env                    # Secrets (created by pipeline)
+└── .gitea/
+    └── workflows/
+        └── deploy.yml      # Deployment pipeline
+```
+
+## Adding a New Service
+
+1. Create a new directory in `stacks/`:
+
+```bash
+mkdir -p seedbox/stacks/myservice
+```
+
+2. Create `docker-compose.yml`:
+
+```yaml
+services:
+  ts-myservice:
+    image: tailscale/tailscale:latest
+    hostname: myservice
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_EXTRA_ARGS=--advertise-tags=tag:container
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_USERSPACE=false
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ./serve.json:/config/serve.json:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+    restart: unless-stopped
+
+  myservice:
+    image: myservice/image:latest
+    container_name: myservice
+    network_mode: service:ts-myservice
+    depends_on:
+      - ts-myservice
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Paris
+    volumes:
+      - config:/config
+    restart: unless-stopped
+
+volumes:
+  ts-state:
+  config:
+```
+
+3. Create `serve.json`:
+
+```json
+{
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "myservice.taila5ad8.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:PORT"
+        }
+      }
+    }
+  }
+}
+```
+
+4. Commit and push:
+
+```bash
+git add seedbox/stacks/myservice/
+git commit -m "feat(seedbox): add myservice stack"
+git push origin main
+```
+
+## Removing a Service
+
+### Option A: Via Git (recommended)
+
+1. Remove the stack directory:
+
+```bash
+rm -rf seedbox/stacks/myservice/
+git add -A
+git commit -m "feat(seedbox): remove myservice stack"
+git push origin main
+```
+
+2. Manually stop containers on seedbox:
+
+```bash
+ssh debian@seedbox.taila5ad8.ts.net
+cd /srv/seedbox/stacks/myservice
+docker compose down -v
+```
+
+3. Remove Tailscale device from admin console
+
+### Option B: Manual (emergency)
+
+```bash
+ssh debian@seedbox.taila5ad8.ts.net
+cd /srv/seedbox/stacks/myservice
+docker compose down -v
+rm -rf /srv/seedbox/stacks/myservice
+# Remove device from https://login.tailscale.com/admin/machines
+```
+
+## Updating Services
+
+### Update Docker Images
+
+The pipeline automatically pulls latest images on each deployment. To force an update:
+
+```bash
+# Trigger a new deployment by making any change
+git commit --allow-empty -m "chore: trigger deployment"
+git push origin main
+```
+
+### Manual Update
+
+```bash
+ssh debian@seedbox.taila5ad8.ts.net
+cd /srv/seedbox/stacks/transmission
+docker compose pull
+docker compose up -d
 ```
 
 ## Network Access
 
 | Service | Public | Tailscale |
 |---------|--------|-----------|
-| BitTorrent peers | ✅ Port 51413 | ✅ |
-| Transmission WebUI | ❌ | ✅ HTTPS via `tailscale serve` |
-| SSH | ❌ | ✅ Tailscale SSH |
-| NFS (to NAS) | ❌ | ✅ |
+| SSH | ❌ | ✅ `seedbox.taila5ad8.ts.net` |
+| Transmission WebUI | ❌ | ✅ HTTPS via sidecar |
+| Transmission Peer | ✅ Port 51413 | ✅ |
+| Prowlarr | ❌ | ✅ HTTPS via sidecar |
+| Sonarr | ❌ | ✅ HTTPS via sidecar |
+| Portainer | ❌ | ✅ HTTPS via sidecar |
 
-### WebUI Access
+## Troubleshooting
 
-The WebUI is exposed via Tailscale Serve with automatic HTTPS:
-
-```
-https://seedbox.<your-tailnet>.ts.net
-```
-
-The WebUI binds to `localhost:9091` and is proxied through `tailscale serve`, ensuring it's never accessible from the public internet.
-
-## Storage Architecture
-
-```
-NAS (via Tailscale)                    Seedbox LXC (70GB)
-┌─────────────────────┐                ┌─────────────────────┐
-│ /volume2/Downloads  │◄──── NFS ────►│ /mnt/download       │
-│ (incomplete + temp) │                │   └► /downloads     │
-├─────────────────────┤                │      (in container) │
-│ /volume2/Multimédia │◄──── NFS ────►│ /mnt/media          │
-│ (ISOs, VMDK, QCOW)  │                │   └► /media         │
-└─────────────────────┘                │      (in container) │
-                                       └─────────────────────┘
-```
-
-### Transmission Paths
-
-| Container Path | Host Path | NAS Path | Purpose |
-|----------------|-----------|----------|---------|
-| `/downloads` | `/mnt/download` | `/volume2/Downloads` | Incomplete + completed torrents |
-| `/media` | `/mnt/media` | `/volume2/Multimédia` | Final ISOs, VMDK, QCOW images |
-
-### Recommended Workflow
-
-1. Torrents download to `/downloads` (on NAS via NFS)
-2. Once complete, move ISOs to `/media/iso/<distro>/`
-3. Proxmox mounts the same NAS share for VM templates
-
-## What it does
-
-1. Sets hostname
-2. Installs base packages (vim, fail2ban, unattended-upgrades, nfs-common, at)
-3. Installs and connects Tailscale
-4. Installs Docker
-5. Configures dual NFS mounts to NAS (same as Proxmox)
-6. Deploys Transmission container with both mounts
-7. Exposes WebUI via `tailscale serve` (HTTPS on tailnet)
-8. Configures UFW (peer port public, WebUI via Tailscale only)
-9. Temporarily opens SSH port 22 for 5 minutes (safety net)
-
-## SSH Safety Net
-
-During installation, SSH port 22 is temporarily opened for 5 minutes to prevent lockout if you're connected via public IP. After 5 minutes, it will be automatically closed and only Tailscale SSH will work.
+### Check container status
 
 ```bash
-# List scheduled jobs
-sudo atq
-
-# Cancel the scheduled SSH closure (replace N with job number)
-sudo atrm N
-
-# Manually close SSH port 22 if needed
-sudo ufw delete allow 22/tcp
+docker ps -a
+docker logs ts-transmission
+docker logs transmission
 ```
 
-## Directory Structure
+### Check Tailscale sidecar
 
-Organize your media by type:
-
+```bash
+docker exec ts-transmission tailscale status
+docker exec ts-transmission tailscale serve status
 ```
-/mnt/media/
-├── iso/
-│   ├── debian/
-│   │   └── debian-12.7.0-amd64-netinst.iso
-│   ├── ubuntu/
-│   │   └── ubuntu-24.04.1-live-server-amd64.iso
-│   ├── rhel/
-│   │   └── rocky-9.4-x86_64-minimal.iso
-│   └── proxmox/
-│       └── proxmox-ve_8.2-1.iso
-├── vmdk/
-│   └── windows-server-2022.vmdk
-└── qcow/
-    └── cloud-init-debian-12.qcow2
+
+### Restart a stack
+
+```bash
+cd /srv/seedbox/stacks/transmission
+docker compose restart
+```
+
+### View all Tailscale devices
+
+```bash
+tailscale status
+```
+
+### Force re-authentication of sidecar
+
+```bash
+cd /srv/seedbox/stacks/transmission
+docker compose down
+docker volume rm transmission_ts-state
+docker compose up -d
 ```
 
 ## NAS Configuration (Synology)
 
-Ensure your NAS exports both shares via NFS:
+Ensure your NAS exports the media share via NFS:
 
-1. Control Panel → Shared Folder → Edit → NFS Permissions
-2. For each share (`Downloads` and `Multimédia`), add rule:
-   - Hostname/IP: `*` or Tailscale IP of seedbox (e.g., `100.x.x.x`)
+1. **Control Panel → Shared Folder → Edit → NFS Permissions**
+2. Add rule:
+   - Hostname/IP: `100.64.0.0/10` (Tailscale subnet) or specific IP
    - Privilege: Read/Write
    - Squash: No mapping
    - Security: sys
    - Enable NFSv4.1: ✅
 
-## Post-install
+## Post-install Verification
 
 ```bash
-# Check NFS mounts
-df -h /mnt/download /mnt/media
+# Check NFS mount
+df -h /mnt/media
 
-# View Transmission logs
-cd ~/transmission && docker compose logs -f
+# Check Docker
+docker ps
 
-# Restart Transmission
-cd ~/transmission && docker compose restart
+# Check Tailscale devices
+tailscale status
 
-# Check tailscale serve status
-tailscale serve status
-
-# Move completed ISO to final location
-mv /mnt/download/debian-12.iso /mnt/media/iso/debian/
-```
-
-## Troubleshooting
-
-### WebUI not accessible
-
-```bash
-# Check tailscale serve is running
-tailscale serve status
-
-# Restart if needed
-sudo tailscale serve --bg http://localhost:9091
-
-# Check container is running
-docker ps | grep transmission
-
-# Check container logs
-cd ~/transmission && docker compose logs
-```
-
-### Reset Transmission credentials
-
-```bash
-cd ~/transmission
-docker compose down
-# Edit docker-compose.yml to change USER and PASS
-vim docker-compose.yml
-docker compose up -d
+# Test service access
+curl -k https://transmission.taila5ad8.ts.net
 ```
