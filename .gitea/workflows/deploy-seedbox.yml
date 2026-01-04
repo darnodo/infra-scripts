@@ -22,14 +22,14 @@ jobs:
         run: apk add --no-cache openssh-client git
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        run: |
+          git clone --depth 1 --branch main https://gitea.arnodo.fr/Damien/infra-scripts.git .
 
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SEEDBOX_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          # Trust the seedbox host
           ssh-keyscan -H seedbox.taila5ad8.ts.net >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Validate compose files (PR only)
