@@ -76,12 +76,15 @@ main() {
         git \
         > /dev/null
 
+    # Ensure atd service is running (needed for delayed SSH lockdown)
+    sudo systemctl enable --now atd
+
     # Step 4: Install Tailscale
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
 
-    log_info "Connecting to Tailscale (without SSH management)..."
-    sudo tailscale up
+    log_info "Connecting to Tailscale with --accept-routes..."
+    sudo tailscale up --accept-routes
     
     # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
@@ -117,24 +120,36 @@ EOF
     log_info "Adding current user to docker group..."
     sudo usermod -aG docker "$USER"
 
-    # Step 7: Configure UFW firewall
-    log_info "Configuring UFW firewall..."
+    # Step 7: Configure UFW firewall (initial - SSH still open on public)
+    log_info "Configuring UFW firewall (initial setup)..."
     sudo ufw --force reset > /dev/null
     sudo ufw default deny incoming > /dev/null
     sudo ufw default allow outgoing > /dev/null
+    # SSH temporarily on all interfaces (will be locked down after Tailscale is confirmed)
+    sudo ufw allow 22/tcp > /dev/null
     # BitTorrent peer port (public)
     sudo ufw allow 51413/tcp > /dev/null
     sudo ufw allow 51413/udp > /dev/null
-    # Allow all traffic on Tailscale interface (including SSH)
+    # Allow all traffic on Tailscale interface
     sudo ufw allow in on tailscale0 > /dev/null
     sudo ufw --force enable > /dev/null
 
-    # Step 8: Create directory structure
+    # Step 8: Schedule SSH lockdown via 'at' (2 minutes delay for safety)
+    log_info "Scheduling SSH lockdown to Tailscale-only in 2 minutes..."
+    log_warn "IMPORTANT: Reconnect via Tailscale SSH within 2 minutes!"
+    log_warn "  ssh ${USER}@${TS_FQDN}"
+    
+    echo "sudo ufw delete allow 22/tcp" | at now + 2 minutes 2>/dev/null || {
+        log_warn "Failed to schedule SSH lockdown via 'at'. Manual lockdown required."
+        log_warn "Run manually after confirming Tailscale access: sudo ufw delete allow 22/tcp"
+    }
+
+    # Step 9: Create directory structure
     log_info "Creating directory structure..."
     sudo mkdir -p "$SEEDBOX_DIR"
     sudo chown -R "$USER:$USER" "$SEEDBOX_DIR"
 
-    # Step 9: Configure NFS mount (if NFS_SERVER provided)
+    # Step 10: Configure NFS mount (if NFS_SERVER provided)
     if [[ -n "$NFS_SERVER" ]]; then
         log_info "Configuring NFS mount..."
         sudo mkdir -p "$NFS_MOUNT_MEDIA"
@@ -149,7 +164,7 @@ EOF
         log_warn "NFS_SERVER not set. NFS mount skipped. Set it later if needed."
     fi
 
-    # Step 10: Clone repository
+    # Step 11: Clone repository
     log_info "Cloning infra-scripts repository..."
     if [[ -d "${SEEDBOX_DIR}/.git" ]]; then
         cd "$SEEDBOX_DIR"
@@ -166,7 +181,7 @@ EOF
         git checkout -b main --track origin/main -- seedbox/ 2>/dev/null || true
     fi
 
-    # Step 11: Configure MOTD
+    # Step 12: Configure MOTD
     log_info "Configuring MOTD..."
     sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
     
@@ -188,7 +203,7 @@ echo ""
 echo "Docker Seedbox Server"
 echo "─────────────────────────────────────────"
 echo "Access:"
-echo "  • SSH        : ${TS_FQDN}"
+echo "  • SSH        : ${TS_FQDN} (Tailscale only)"
 echo "  • Seeding    : Public port 51413"
 echo ""
 echo "Services: (via Tailscale)"
@@ -208,9 +223,14 @@ MOTD
 
     # Final summary
     echo ""
-    log_info "=========================================="
+    log_info "==========================================="
     log_info "Server setup complete!"
-    log_info "=========================================="
+    log_info "==========================================="
+    echo ""
+    log_warn "⚠️  SSH LOCKDOWN SCHEDULED IN 2 MINUTES!"
+    log_warn "    Reconnect NOW via Tailscale:"
+    echo ""
+    echo "    ssh ${USER}@${TS_FQDN}"
     echo ""
     echo "Server accessible at:"
     echo "  SSH: ssh user@${TS_FQDN}"
@@ -232,9 +252,10 @@ MOTD
     fi
     echo ""
     echo "Next steps:"
-    echo "  1. Configure Gitea secrets (see README.md)"
-    echo "  2. Push to main branch to trigger deployment"
-    echo "  3. Services will be available at <service>.taila5ad8.ts.net"
+    echo "  1. Reconnect via Tailscale SSH IMMEDIATELY"
+    echo "  2. Configure Gitea secrets (see README.md)"
+    echo "  3. Push to main branch to trigger deployment"
+    echo "  4. Services will be available at <service>.taila5ad8.ts.net"
     echo ""
     log_info "SSH access via Tailscale: ssh user@${TS_FQDN}"
     echo ""
