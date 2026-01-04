@@ -80,8 +80,8 @@ main() {
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
 
-    log_info "Connecting to Tailscale (SSH only)..."
-    sudo tailscale up --ssh
+    log_info "Connecting to Tailscale (without SSH management)..."
+    sudo tailscale up
     
     # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
@@ -125,18 +125,9 @@ EOF
     # BitTorrent peer port (public)
     sudo ufw allow 51413/tcp > /dev/null
     sudo ufw allow 51413/udp > /dev/null
-    # Allow all traffic on Tailscale interface
+    # Allow all traffic on Tailscale interface (including SSH)
     sudo ufw allow in on tailscale0 > /dev/null
-    # Temporary SSH access (safety net)
-    sudo ufw allow 22/tcp > /dev/null
     sudo ufw --force enable > /dev/null
-
-    # Schedule SSH rule removal in 5 minutes
-    log_warn "SSH port 22 temporarily open for 5 minutes (safety net)."
-    echo "sudo ufw delete allow 22/tcp && logger 'UFW: SSH port 22 closed'" | sudo at now + 5 minutes 2>/dev/null || {
-        log_warn "Could not schedule automatic SSH cleanup. Run manually:"
-        log_warn "  sudo ufw delete allow 22/tcp"
-    }
 
     # Step 8: Create directory structure
     log_info "Creating directory structure..."
@@ -222,7 +213,7 @@ MOTD
     log_info "=========================================="
     echo ""
     echo "Server accessible at:"
-    echo "  SSH: ${TS_FQDN}"
+    echo "  SSH: ssh user@${TS_FQDN}"
     echo ""
     echo "Directory structure:"
     echo "  ${SEEDBOX_DIR}/"
@@ -245,8 +236,7 @@ MOTD
     echo "  2. Push to main branch to trigger deployment"
     echo "  3. Services will be available at <service>.taila5ad8.ts.net"
     echo ""
-    log_warn "SSH port 22 will be closed in 5 minutes."
-    log_warn "Use Tailscale SSH: ssh ${TS_FQDN}"
+    log_info "SSH access via Tailscale: ssh user@${TS_FQDN}"
     echo ""
 }
 
