@@ -83,8 +83,8 @@ main() {
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
 
-    log_info "Connecting to Tailscale..."
-    sudo tailscale up
+    log_info "Connecting to Tailscale with --accept-routes..."
+    sudo tailscale up --accept-routes
     
     # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
@@ -164,21 +164,39 @@ EOF
         log_warn "NFS_SERVER not set. NFS mount skipped. Set it later if needed."
     fi
 
-    # Step 11: Clone repository
-    log_info "Cloning infra-scripts repository..."
+    # Step 11: Clone repository (sparse checkout for seedbox/ only)
+    log_info "Cloning seedbox configuration..."
     if [[ -d "${SEEDBOX_DIR}/.git" ]]; then
         cd "$SEEDBOX_DIR"
         git pull origin main || log_warn "Git pull failed"
     else
-        git clone "$REPO_URL" "${SEEDBOX_DIR}/repo-tmp"
-        mv "${SEEDBOX_DIR}/repo-tmp/seedbox/"* "$SEEDBOX_DIR/" 2>/dev/null || true
-        mv "${SEEDBOX_DIR}/repo-tmp/seedbox/".* "$SEEDBOX_DIR/" 2>/dev/null || true
-        rm -rf "${SEEDBOX_DIR}/repo-tmp"
+        # Clean any existing content
+        rm -rf "${SEEDBOX_DIR:?}"/*
+        rm -rf "${SEEDBOX_DIR}"/.[!.]* 2>/dev/null || true
+        
         cd "$SEEDBOX_DIR"
         git init
         git remote add origin "$REPO_URL"
-        git fetch origin
-        git checkout -b main --track origin/main -- seedbox/ 2>/dev/null || true
+        
+        # Configure sparse checkout to only get seedbox/ directory
+        git sparse-checkout init --cone
+        git sparse-checkout set seedbox
+        
+        # Fetch and checkout
+        git fetch origin main
+        git checkout main
+        
+        # Move contents of seedbox/ to root and clean up
+        if [[ -d "${SEEDBOX_DIR}/seedbox" ]]; then
+            # Move all files including hidden ones
+            shopt -s dotglob
+            mv "${SEEDBOX_DIR}/seedbox"/* "${SEEDBOX_DIR}/" 2>/dev/null || true
+            shopt -u dotglob
+            rmdir "${SEEDBOX_DIR}/seedbox" 2>/dev/null || true
+        fi
+        
+        # Disable sparse checkout now that we have the files
+        git sparse-checkout disable 2>/dev/null || true
     fi
 
     # Step 12: Configure MOTD
