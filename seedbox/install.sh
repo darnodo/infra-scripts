@@ -74,6 +74,7 @@ main() {
         ufw \
         at \
         git \
+        rsync \
         > /dev/null
 
     # Ensure atd service is running (needed for delayed SSH lockdown)
