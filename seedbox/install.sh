@@ -83,8 +83,8 @@ main() {
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
 
-    log_info "Connecting to Tailscale with --accept-routes..."
-    sudo tailscale up --accept-routes
+    log_info "Connecting to Tailscale..."
+    sudo tailscale up
     
     # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
