@@ -1,6 +1,9 @@
 #!/bin/bash
-# install.sh - Automated deployment of Seedbox Server with Transmission
-# Usage: NFS_SERVER=<nas-ip> curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh | bash
+# install.sh - Seedbox Server Initial Setup
+# Usage: curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh | bash
+#
+# This script prepares the server for Docker-based seedbox deployment.
+# Services are deployed separately via Gitea Actions.
 
 set -euo pipefail
 
@@ -13,6 +16,16 @@ NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Configuration (can be overridden via environment)
+HOSTNAME="${SEEDBOX_HOSTNAME:-seedbox}"
+NFS_SERVER="${NFS_SERVER:-}"
+NFS_SHARE_MEDIA="${NFS_SHARE_MEDIA:-/volume2/Multimédia}"
+NFS_MOUNT_MEDIA="${NFS_MOUNT_MEDIA:-/mnt/media}"
+NFS_OPTS="defaults,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30s"
+SEEDBOX_DIR="/srv/seedbox"
+DOWNLOADS_DIR="${SEEDBOX_DIR}/downloads"
+REPO_URL="${REPO_URL:-https://gitea.arnodo.fr/Damien/infra-scripts.git}"
 
 # Pre-flight checks
 check_root() {
@@ -32,83 +45,57 @@ check_debian() {
     fi
 }
 
-check_required_vars() {
-    if [[ -z "${NFS_SERVER:-}" ]]; then
-        log_error "NFS_SERVER environment variable is required."
-        log_error "Usage: NFS_SERVER=<nas-ip-or-hostname> curl -fsSL ... | bash"
-        exit 1
-    fi
-}
-
-# Generate random password if not provided
-# Note: uses head -c with || true to avoid SIGPIPE with pipefail
-generate_password() {
-    head -c 100 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16 || true
-}
-
-# Get Tailscale FQDN hostname from Self.DNSName
-# Extracts DNSName from the Self object in tailscale status --json
-get_tailscale_hostname() {
-    local dns_name
-    # Use awk to extract Self.DNSName specifically (not from peers)
-    # Looks for DNSName within the Self block
-    dns_name=$(tailscale status --json 2>/dev/null | awk -F'"' '
-        /"Self"/ { in_self=1 }
-        in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
-    ' || true)
-    
-    if [[ -z "$dns_name" ]]; then
-        # Fallback: use hostname + default tailnet domain hint
-        dns_name="${HOSTNAME}.ts.net"
-        log_warn "Could not determine Tailscale FQDN, using fallback: $dns_name"
-    fi
-    echo "$dns_name"
-}
-
-# Configuration variables (can be overridden via environment)
-HOSTNAME="${SEEDBOX_HOSTNAME:-seedbox}"
-# NFS shares configuration
-NFS_SHARE_DOWNLOAD="${NFS_SHARE_DOWNLOAD:-/volume2/Downloads}"
-NFS_SHARE_MEDIA="${NFS_SHARE_MEDIA:-/volume2/Multimédia}"
-NFS_MOUNT_DOWNLOAD="${NFS_MOUNT_DOWNLOAD:-/mnt/download}"
-NFS_MOUNT_MEDIA="${NFS_MOUNT_MEDIA:-/mnt/media}"
-# NFS mount options (same as Proxmox)
-NFS_OPTS="defaults,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30s"
-PEER_PORT="${PEER_PORT:-51413}"
-TIMEZONE="${TZ:-Europe/Paris}"
-TRANSMISSION_USER="${TRANSMISSION_USER:-admin}"
-TRANSMISSION_PASS="${TRANSMISSION_PASS:-$(generate_password)}"
-TRANSMISSION_DIR="$HOME/transmission"
-
 main() {
-    log_info "=== Seedbox Server Deployment ==="
+    log_info "=== Seedbox Server Setup ==="
     
     check_root
     check_debian
-    check_required_vars
 
+    # Step 1: System update
+    log_info "Updating system..."
+    sudo apt-get update -qq
+    sudo apt-get upgrade -y -qq
+
+    # Step 2: Set hostname
     log_info "Setting hostname to: $HOSTNAME"
     echo "$HOSTNAME" | sudo tee /etc/hostname > /dev/null
     sudo hostnamectl set-hostname "$HOSTNAME"
 
+    # Step 3: Install base packages
     log_info "Installing base packages..."
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades nfs-common ufw at > /dev/null
+    sudo apt-get install -y -qq \
+        vim \
+        ca-certificates \
+        curl \
+        gnupg \
+        lsb-release \
+        fail2ban \
+        unattended-upgrades \
+        nfs-common \
+        ufw \
+        at \
+        git \
+        > /dev/null
 
+    # Step 4: Install Tailscale
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
 
-    log_info "Connecting to Tailscale..."
+    log_info "Connecting to Tailscale (SSH only)..."
     sudo tailscale up --ssh
+    
+    # Get Tailscale hostname for display
+    TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
+        /"Self"/ { in_self=1 }
+        in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
+    ' || echo "${HOSTNAME}.ts.net")
 
+    # Step 5: Install Docker
     log_info "Installing Docker..."
-    # Use official Docker installation method (DEB822 format)
-    # See: https://docs.docker.com/engine/install/debian/
     sudo install -m 0755 -d /etc/apt/keyrings
     sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     sudo chmod a+r /etc/apt/keyrings/docker.asc
     
-    # Add Docker repository using DEB822 format (.sources)
     # shellcheck disable=SC1091
     sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null <<EOF
 Types: deb
@@ -119,97 +106,83 @@ Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 
     sudo apt-get update -qq
-    sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin > /dev/null
+    sudo apt-get install -y -qq \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin \
+        > /dev/null
 
+    # Step 6: Configure Docker for user
     log_info "Adding current user to docker group..."
     sudo usermod -aG docker "$USER"
 
-    log_info "Configuring NFS mounts..."
-    sudo mkdir -p "$NFS_MOUNT_DOWNLOAD" "$NFS_MOUNT_MEDIA"
-    
-    # Add download share to fstab if not already present
-    if ! grep -q "${NFS_SERVER}:${NFS_SHARE_DOWNLOAD}" /etc/fstab; then
-        log_info "Adding NFS mount: ${NFS_SERVER}:${NFS_SHARE_DOWNLOAD} -> ${NFS_MOUNT_DOWNLOAD}"
-        echo "${NFS_SERVER}:${NFS_SHARE_DOWNLOAD} ${NFS_MOUNT_DOWNLOAD} nfs ${NFS_OPTS} 0 0" | sudo tee -a /etc/fstab > /dev/null
-    fi
-    
-    # Add media share to fstab if not already present
-    if ! grep -q "${NFS_SERVER}:${NFS_SHARE_MEDIA}" /etc/fstab; then
-        log_info "Adding NFS mount: ${NFS_SERVER}:${NFS_SHARE_MEDIA} -> ${NFS_MOUNT_MEDIA}"
-        echo "${NFS_SERVER}:${NFS_SHARE_MEDIA} ${NFS_MOUNT_MEDIA} nfs ${NFS_OPTS} 0 0" | sudo tee -a /etc/fstab > /dev/null
-    fi
-    
-    # Mount NFS shares
-    sudo mount -a || log_warn "NFS mount failed - ensure NAS is accessible via Tailscale"
-
-    log_info "Creating Transmission stack..."
-    mkdir -p "$TRANSMISSION_DIR"
-    
-    cat > "$TRANSMISSION_DIR/docker-compose.yml" << EOF
-services:
-  transmission:
-    image: linuxserver/transmission:latest
-    container_name: transmission
-    restart: unless-stopped
-    ports:
-      # Peer port - public for seeding
-      - "${PEER_PORT}:${PEER_PORT}"
-      - "${PEER_PORT}:${PEER_PORT}/udp"
-      # WebUI - bound to localhost only (exposed via tailscale serve)
-      - "127.0.0.1:9091:9091"
-    volumes:
-      - ./config:/config
-      # Downloads: incomplete and complete torrents
-      - ${NFS_MOUNT_DOWNLOAD}:/downloads
-      # Media: final destination for completed ISOs and images
-      - ${NFS_MOUNT_MEDIA}:/media
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=${TIMEZONE}
-      - USER=${TRANSMISSION_USER}
-      - PASS=${TRANSMISSION_PASS}
-      - PEERPORT=${PEER_PORT}
-EOF
-
-    log_info "Starting Transmission..."
-    cd "$TRANSMISSION_DIR"
-    # Use sg to run docker compose with the new docker group membership
-    sg docker -c "docker compose up -d"
-
-    log_info "Exposing Transmission WebUI via Tailscale..."
-    sudo tailscale serve --bg http://localhost:9091
-
-    # Get Tailscale hostname for final message
-    TS_HOSTNAME=$(get_tailscale_hostname)
-
+    # Step 7: Configure UFW firewall
     log_info "Configuring UFW firewall..."
     sudo ufw --force reset > /dev/null
     sudo ufw default deny incoming > /dev/null
     sudo ufw default allow outgoing > /dev/null
-    # Allow BitTorrent peer port from public internet
-    sudo ufw allow ${PEER_PORT}/tcp > /dev/null
-    sudo ufw allow ${PEER_PORT}/udp > /dev/null
+    # BitTorrent peer port (public)
+    sudo ufw allow 51413/tcp > /dev/null
+    sudo ufw allow 51413/udp > /dev/null
     # Allow all traffic on Tailscale interface
     sudo ufw allow in on tailscale0 > /dev/null
-    # Temporarily allow SSH during setup (safety net)
+    # Temporary SSH access (safety net)
     sudo ufw allow 22/tcp > /dev/null
     sudo ufw --force enable > /dev/null
 
     # Schedule SSH rule removal in 5 minutes
     log_warn "SSH port 22 temporarily open for 5 minutes (safety net)."
-    log_warn "Verify Tailscale SSH access works, then wait or run: sudo ufw delete allow 22/tcp"
-    echo "sudo ufw delete allow 22/tcp && logger 'UFW: SSH port 22 closed by scheduled task'" | sudo at now + 5 minutes 2>/dev/null || {
-        log_warn "Could not schedule automatic SSH cleanup. Run manually after verification:"
+    echo "sudo ufw delete allow 22/tcp && logger 'UFW: SSH port 22 closed'" | sudo at now + 5 minutes 2>/dev/null || {
+        log_warn "Could not schedule automatic SSH cleanup. Run manually:"
         log_warn "  sudo ufw delete allow 22/tcp"
     }
 
+    # Step 8: Create directory structure
+    log_info "Creating directory structure..."
+    sudo mkdir -p "$SEEDBOX_DIR"
+    sudo mkdir -p "$DOWNLOADS_DIR"
+    sudo chown -R "$USER:$USER" "$SEEDBOX_DIR"
+
+    # Step 9: Configure NFS mount (if NFS_SERVER provided)
+    if [[ -n "$NFS_SERVER" ]]; then
+        log_info "Configuring NFS mount..."
+        sudo mkdir -p "$NFS_MOUNT_MEDIA"
+        
+        if ! grep -q "${NFS_SERVER}:${NFS_SHARE_MEDIA}" /etc/fstab; then
+            log_info "Adding NFS mount: ${NFS_SERVER}:${NFS_SHARE_MEDIA} -> ${NFS_MOUNT_MEDIA}"
+            echo "${NFS_SERVER}:${NFS_SHARE_MEDIA} ${NFS_MOUNT_MEDIA} nfs ${NFS_OPTS} 0 0" | sudo tee -a /etc/fstab > /dev/null
+        fi
+        
+        sudo mount -a || log_warn "NFS mount failed - ensure NAS is accessible via Tailscale"
+    else
+        log_warn "NFS_SERVER not set. NFS mount skipped. Set it later if needed."
+    fi
+
+    # Step 10: Clone repository
+    log_info "Cloning infra-scripts repository..."
+    if [[ -d "${SEEDBOX_DIR}/.git" ]]; then
+        cd "$SEEDBOX_DIR"
+        git pull origin main || log_warn "Git pull failed"
+    else
+        git clone "$REPO_URL" "${SEEDBOX_DIR}/repo-tmp"
+        mv "${SEEDBOX_DIR}/repo-tmp/seedbox/"* "$SEEDBOX_DIR/" 2>/dev/null || true
+        mv "${SEEDBOX_DIR}/repo-tmp/seedbox/".* "$SEEDBOX_DIR/" 2>/dev/null || true
+        rm -rf "${SEEDBOX_DIR}/repo-tmp"
+        cd "$SEEDBOX_DIR"
+        git init
+        git remote add origin "$REPO_URL"
+        git fetch origin
+        git checkout -b main --track origin/main -- seedbox/ 2>/dev/null || true
+    fi
+
+    # Step 11: Configure MOTD
     log_info "Configuring MOTD..."
     sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
     
     cat << 'MOTD' | sudo tee /etc/update-motd.d/00-seedbox > /dev/null
 #!/bin/bash
-# Get Tailscale FQDN from Self.DNSName
 TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
     /"Self"/ { in_self=1 }
     in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
@@ -223,49 +196,56 @@ echo "\___ \|  _| |  _| | | | |  _ \| | | \  /"
 echo " ___) | |___| |___| |_| | |_) | |_| /  \\"
 echo "|____/|_____|_____|____/|____/ \___/_/\_\\"
 echo ""
-echo "ISO Seedbox Server - Transmission"
+echo "Docker Seedbox Server"
 echo "─────────────────────────────────────────"
 echo "Access:"
-echo "  • WebUI     : https://${TS_FQDN}"
-echo "  • SSH       : Tailscale only"
-echo "  • Seeding   : Public port 51413"
+echo "  • SSH        : ${TS_FQDN}"
+echo "  • Seeding    : Public port 51413"
+echo ""
+echo "Services: (via Tailscale)"
+docker ps --format '  • {{.Names}} : {{.Status}}' 2>/dev/null || echo "  Docker not running"
 echo ""
 echo "Storage:"
-echo "  • Downloads : /mnt/download"
-echo "  • Media     : /mnt/media"
+echo "  • Downloads  : /srv/seedbox/downloads"
+echo "  • Media      : /mnt/media (NFS)"
 echo ""
 echo "Useful commands:"
-echo "  cd ~/transmission && docker compose logs -f"
-echo "  df -h /mnt/download /mnt/media"
+echo "  cd /srv/seedbox && docker compose ls"
+echo "  docker logs -f <container>"
 echo "─────────────────────────────────────────"
 echo ""
 MOTD
     sudo chmod +x /etc/update-motd.d/00-seedbox
 
+    # Final summary
     echo ""
     log_info "=========================================="
-    log_info "Deployment complete!"
+    log_info "Server setup complete!"
     log_info "=========================================="
     echo ""
-    echo "Transmission WebUI:"
-    echo "  URL      : https://${TS_HOSTNAME}"
-    echo "  Username : ${TRANSMISSION_USER}"
-    echo "  Password : ${TRANSMISSION_PASS}"
+    echo "Server accessible at:"
+    echo "  SSH: ${TS_FQDN}"
     echo ""
-    echo "Storage (NFS mounts):"
-    echo "  Downloads : ${NFS_SERVER}:${NFS_SHARE_DOWNLOAD} -> ${NFS_MOUNT_DOWNLOAD}"
-    echo "  Media     : ${NFS_SERVER}:${NFS_SHARE_MEDIA} -> ${NFS_MOUNT_MEDIA}"
+    echo "Directory structure:"
+    echo "  ${SEEDBOX_DIR}/"
+    echo "  ├── stacks/          # Docker Compose stacks"
+    echo "  ├── downloads/       # Local downloads (SSD)"
+    echo "  └── .env             # Secrets (created by Gitea Actions)"
     echo ""
-    echo "Transmission paths:"
-    echo "  /downloads -> ${NFS_MOUNT_DOWNLOAD} (incomplete + complete torrents)"
-    echo "  /media     -> ${NFS_MOUNT_MEDIA} (final destination for ISOs)"
+    echo "NFS mount:"
+    if [[ -n "$NFS_SERVER" ]]; then
+        echo "  ${NFS_SERVER}:${NFS_SHARE_MEDIA} -> ${NFS_MOUNT_MEDIA}"
+    else
+        echo "  Not configured. Run with NFS_SERVER=<ip> to configure."
+    fi
     echo ""
-    echo "Peer port  : ${PEER_PORT} (public)"
+    echo "Next steps:"
+    echo "  1. Configure Gitea secrets (see README.md)"
+    echo "  2. Push to main branch to trigger deployment"
+    echo "  3. Services will be available at <service>.taila5ad8.ts.net"
     echo ""
     log_warn "SSH port 22 will be closed in 5 minutes."
-    log_warn "To cancel: sudo atq (list jobs) then sudo atrm <job-number>"
-    echo ""
-    echo "Save these credentials! The password was auto-generated."
+    log_warn "Use Tailscale SSH: ssh ${TS_FQDN}"
     echo ""
 }
 
