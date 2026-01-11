@@ -118,6 +118,42 @@ EOF
     log_info "Exposing NPM admin panel via Tailscale..."
     sudo tailscale serve --bg http://localhost:81
 
+    # Configure MOTD
+    log_info "Configuring MOTD..."
+    sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
+    
+    cat << 'MOTD' | sudo tee /etc/update-motd.d/00-proxy > /dev/null
+#!/bin/bash
+TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
+    /"Self"/ { in_self=1 }
+    in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
+')
+[[ -z "$TS_FQDN" ]] && TS_FQDN="$(hostname).ts.net"
+
+echo ""
+echo " ____  ____   _____  ____   __"
+echo "|  _ \|  _ \ / _ \ \/ /\ \ / /"
+echo "| |_) | |_) | | | \  /  \ V /"
+echo "|  __/|  _ <| |_| /  \   | |"
+echo "|_|   |_| \_\\\\___/_/\_\  |_|"
+echo ""
+echo "Nginx Proxy Manager Server"
+echo "─────────────────────────────────────────"
+echo "Access:"
+echo "  • Admin panel : https://${TS_FQDN} (Tailscale)"
+echo "  • HTTP/HTTPS  : Public ports 80/443"
+echo ""
+echo "Services:"
+docker ps --format '  • {{.Names}} : {{.Status}}' 2>/dev/null || echo "  Docker not running"
+echo ""
+echo "Useful commands:"
+echo "  cd ~/npm && docker compose logs -f"
+echo "  sudo tailscale serve status"
+echo "─────────────────────────────────────────"
+echo ""
+MOTD
+    sudo chmod +x /etc/update-motd.d/00-proxy
+
     # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
         /"Self"/ { in_self=1 }
