@@ -107,6 +107,47 @@ EOF
         log_warn "  sudo ufw delete allow 22/tcp"
     }
 
+    # Configure MOTD
+    log_info "Configuring MOTD..."
+    sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
+    
+    cat << 'MOTD' | sudo tee /etc/update-motd.d/00-netlab > /dev/null
+#!/bin/bash
+TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
+    /"Self"/ { in_self=1 }
+    in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
+')
+[[ -z "$TS_FQDN" ]] && TS_FQDN="$(hostname).ts.net"
+
+# Get configured SSH port from sshd config
+SSH_PORT=$(grep -h "^Port " /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -1)
+[[ -z "$SSH_PORT" ]] && SSH_PORT="22"
+
+echo ""
+echo " _   _ _____ _____ _        _    ____"
+echo "| \ | | ____|_   _| |      / \  | __ )"
+echo "|  \| |  _|   | | | |     / _ \ |  _ \\"
+echo "| |\  | |___  | | | |___ / ___ \| |_) |"
+echo "|_| \_|_____| |_| |_____/_/   \_\____/"
+echo ""
+echo "ContainerLab Network Lab Server"
+echo "─────────────────────────────────────────"
+echo "Access:"
+echo "  • SSH (public)    : port ${SSH_PORT}"
+echo "  • SSH (Tailscale) : ${TS_FQDN}"
+echo ""
+echo "Labs:"
+containerlab inspect --all 2>/dev/null | head -20 || echo "  No labs running"
+echo ""
+echo "Useful commands:"
+echo "  containerlab deploy -t <topology>.clab.yml"
+echo "  containerlab inspect --all"
+echo "  containerlab destroy -t <topology>.clab.yml"
+echo "─────────────────────────────────────────"
+echo ""
+MOTD
+    sudo chmod +x /etc/update-motd.d/00-netlab
+
     # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
         /"Self"/ { in_self=1 }
