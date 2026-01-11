@@ -107,8 +107,11 @@ EOF
         log_warn "  sudo ufw delete allow 22/tcp"
     }
 
-    # Get Tailscale hostname for final message
-    TS_HOSTNAME=$(tailscale status --json | grep -o '"DNSName":"[^"]*' | head -1 | cut -d'"' -f4 | sed 's/\.$//')
+    # Get Tailscale hostname for display
+    TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
+        /"Self"/ { in_self=1 }
+        in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
+    ' || echo "${HOSTNAME}.ts.net")
 
     echo ""
     log_info "=========================================="
@@ -117,7 +120,7 @@ EOF
     echo ""
     echo "Access:"
     echo "  - Public SSH:    ssh -p ${SSH_PORT} ${USER}@<public-ip>"
-    echo "  - Tailscale SSH: ssh ${USER}@${TS_HOSTNAME} (or use Tailscale SSH)"
+    echo "  - Tailscale SSH: ssh ${USER}@${TS_FQDN} (or use Tailscale SSH)"
     echo ""
     echo "ContainerLab is ready. Example usage:"
     echo "  containerlab deploy -t mylab.clab.yml"
