@@ -118,15 +118,18 @@ EOF
     log_info "Exposing NPM admin panel via Tailscale..."
     sudo tailscale serve --bg http://localhost:81
 
-    # Get Tailscale hostname for final message
-    TS_HOSTNAME=$(tailscale status --json | grep -o '"DNSName":"[^"]*' | head -1 | cut -d'"' -f4 | sed 's/\.$//')
+    # Get Tailscale hostname for display
+    TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
+        /"Self"/ { in_self=1 }
+        in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
+    ' || echo "${HOSTNAME}.ts.net")
 
     echo ""
     log_info "=========================================="
     log_info "Deployment complete!"
     log_info "=========================================="
     echo ""
-    echo "Access NPM admin panel at: https://${TS_HOSTNAME}"
+    echo "Access NPM admin panel at: https://${TS_FQDN}"
     echo "Default login: admin@example.com / changeme"
     echo ""
     echo "Note: Approve exit-node in Tailscale admin console if needed"
