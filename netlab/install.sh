@@ -36,10 +36,11 @@ check_debian() {
 HOSTNAME="${NETLAB_HOSTNAME:-netlab}"
 SSH_PORT="${SSH_PORT:-15222}"
 TIMEZONE="${TZ:-Europe/Paris}"
+TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
 
 main() {
     log_info "=== Network Lab Server Deployment ==="
-    
+
     check_root
     check_debian
 
@@ -55,7 +56,11 @@ main() {
     curl -fsSL https://tailscale.com/install.sh | sh
 
     log_info "Connecting to Tailscale..."
-    sudo tailscale up --ssh --advertise-exit-node
+    if [[ -n "$TAILSCALE_AUTHKEY" ]]; then
+        sudo tailscale up --ssh --advertise-exit-node --auth-key="$TAILSCALE_AUTHKEY"
+    else
+        sudo tailscale up --ssh --advertise-exit-node
+    fi
 
     log_info "Configuring sysctl for exit-node and containerlab support..."
     cat << EOF | sudo tee /etc/sysctl.d/99-netlab.conf > /dev/null
@@ -77,7 +82,6 @@ EOF
     sudo usermod -aG docker "$USER"
 
     log_info "Configuring SSH on port $SSH_PORT..."
-    # Create drop-in config for custom SSH port
     sudo mkdir -p /etc/ssh/sshd_config.d
     cat << EOF | sudo tee /etc/ssh/sshd_config.d/99-netlab.conf > /dev/null
 # Custom SSH port for public access
@@ -91,15 +95,12 @@ EOF
     sudo ufw --force reset > /dev/null
     sudo ufw default deny incoming > /dev/null
     sudo ufw default allow outgoing > /dev/null
-    # Allow custom SSH port from public internet
     sudo ufw allow ${SSH_PORT}/tcp > /dev/null
-    # Allow all traffic on Tailscale interface
     sudo ufw allow in on tailscale0 > /dev/null
     # Temporarily allow SSH port 22 during setup (safety net)
     sudo ufw allow 22/tcp > /dev/null
     sudo ufw --force enable > /dev/null
 
-    # Schedule SSH port 22 rule removal in 5 minutes
     log_warn "SSH port 22 temporarily open for 5 minutes (safety net)."
     log_warn "Verify Tailscale SSH or custom port ${SSH_PORT} works, then wait or run: sudo ufw delete allow 22/tcp"
     echo "sudo ufw delete allow 22/tcp && logger 'UFW: SSH port 22 closed by scheduled task'" | sudo at now + 5 minutes 2>/dev/null || {
@@ -107,10 +108,9 @@ EOF
         log_warn "  sudo ufw delete allow 22/tcp"
     }
 
-    # Configure MOTD
     log_info "Configuring MOTD..."
     sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
-    
+
     cat << 'MOTD' | sudo tee /etc/update-motd.d/00-netlab > /dev/null
 #!/bin/bash
 TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
@@ -119,7 +119,6 @@ TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
 ')
 [[ -z "$TS_FQDN" ]] && TS_FQDN="$(hostname).ts.net"
 
-# Get configured SSH port from sshd config
 SSH_PORT=$(grep -h "^Port " /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -1)
 [[ -z "$SSH_PORT" ]] && SSH_PORT="22"
 
@@ -131,7 +130,7 @@ echo "| |\  | |___  | | | |___ / ___ \| |_) |"
 echo "|_| \_|_____| |_| |_____/_/   \_\____/"
 echo ""
 echo "ContainerLab Network Lab Server"
-echo "─────────────────────────────────────────"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Access:"
 echo "  • SSH (public)    : port ${SSH_PORT}"
 echo "  • SSH (Tailscale) : ${TS_FQDN}"
@@ -143,21 +142,20 @@ echo "Useful commands:"
 echo "  containerlab deploy -t <topology>.clab.yml"
 echo "  containerlab inspect --all"
 echo "  containerlab destroy -t <topology>.clab.yml"
-echo "─────────────────────────────────────────"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 MOTD
     sudo chmod +x /etc/update-motd.d/00-netlab
 
-    # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
         /"Self"/ { in_self=1 }
         in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
     ' || echo "${HOSTNAME}.ts.net")
 
     echo ""
-    log_info "=========================================="
+    log_info "======================================================"
     log_info "Deployment complete!"
-    log_info "=========================================="
+    log_info "======================================================"
     echo ""
     echo "Access:"
     echo "  - Public SSH:    ssh -p ${SSH_PORT} ${USER}@<public-ip>"
