@@ -187,6 +187,13 @@ EOF
   chmod +x /etc/init.d/gitea-runner
   rc-update add gitea-runner default > /dev/null
 
+  log_info "Enabling console auto-login..."
+  mkdir -p /etc/conf.d
+  cat <<'EOF' > /etc/conf.d/agetty
+agetty_options="--autologin root --noclear"
+EOF
+  sed -i 's|^tty1::respawn:/sbin/getty.*|tty1::respawn:/sbin/agetty --autologin root --noclear 38400 tty1|' /etc/inittab
+
   log_info "Cleaning up..."
   rm -rf /var/cache/apk/*
 
