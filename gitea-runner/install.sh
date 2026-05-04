@@ -96,6 +96,13 @@ create_lxc() {
     --features nesting=1,keyctl=1 \
     --start 0
 
+  log_info "Enabling TUN/TAP device for Tailscale..."
+  cat >> "/etc/pve/lxc/${CTID}.conf" <<EOF
+lxc.cgroup2.devices.allow: c 10:200 rwm
+lxc.mount.entry: /dev/net dev/net none bind,create=dir
+lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+EOF
+
   log_info "Starting LXC $CTID..."
   pct start "$CTID"
   sleep 5
