@@ -105,7 +105,7 @@ create_lxc() {
   curl -fsSL "$SCRIPT_URL" | pct exec "$CTID" -- bash -s -- --install
 
   local ip
-  ip=$(pct exec "$CTID" -- hostname -i 2>/dev/null | awk '{print $1}')
+  local ip\n  ip=$(pct exec \"$CTID\" -- ip -4 addr show eth0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
 
   echo ""
   log_info "========================================="
@@ -136,8 +136,8 @@ install_runner() {
   apk add --no-cache curl jq tar bash docker docker-cli-compose > /dev/null
 
   log_info "Starting Docker..."
-  rc-update add docker default > /dev/null
-  rc-service docker start
+  rc-update add docker default > /dev/null 2>&1
+  rc-service docker start > /dev/null 2>&1
 
   local release
   release=$(get_latest_release)
