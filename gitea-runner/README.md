@@ -1,48 +1,48 @@
 # Gitea Act Runner
 
-Script d'installation automatisée d'un runner Gitea Actions dans un LXC Alpine sur Proxmox.
+Automated installation script for a Gitea Actions runner in an Alpine LXC on Proxmox.
 
-## Fonctionnalités
+### Features
 
-Un seul script, trois modes automatiques :
+Single script, three automatic modes:
 
-| Contexte | Action |
-|---|---|
-| Depuis l'hôte Proxmox | Crée le LXC Alpine + installe tout |
-| Depuis un LXC vide | Installe Docker + act_runner + service OpenRC |
-| Depuis un LXC avec act_runner | Met à jour le binaire vers la dernière version |
+| Context | Action |
+|---------|--------|
+| From Proxmox host | Creates Alpine LXC + installs everything |
+| From empty LXC | Installs Docker + act_runner + OpenRC service |
+| From LXC with act_runner installed | Updates binary to latest version |
 
-## Utilisation
+### Usage
 
-### Installation complète (depuis le shell Proxmox)
+#### Full install (from Proxmox shell)
 
 ```bash
 bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh)"
 ```
 
-Le script crée automatiquement un LXC Alpine 3.23 avec Docker et act_runner.
+The script automatically creates an Alpine 3.23 LXC with Docker and act_runner.
 
-### Personnalisation
+#### Customization
 
-Variables d'environnement pour surcharger les valeurs par défaut :
+Environment variables to override defaults:
 
 ```bash
-CTID=120 HOSTNAME=runner-02 CORES=4 RAM=4096 bash -c "$(curl -fsSL ...)"
+CTID=120 HOSTNAME=runner-02 CORES=4 RAM=4096 bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh)"
 ```
 
-| Variable | Défaut | Description |
-|---|---|---|
-| `CTID` | auto | ID du conteneur |
-| `RUNNER_HOSTNAME` | `gitea-runner` | Hostname du LXC |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CTID` | auto | Container ID |
+| `RUNNER_HOSTNAME` | `gitea-runner` | LXC Hostname |
 | `CORES` | `2` | CPU cores |
-| `RAM` | `2048` | RAM en MiB |
-| `DISK` | `8` | Disque en GB |
-| `STORAGE` | `local-lvm` | Storage Proxmox pour le LXC |
-| `BRIDGE` | `vmbr0` | Bridge réseau |
+| `RAM` | `2048` | RAM in MiB |
+| `DISK` | `8` | Disk in GB |
+| `STORAGE` | `local-lvm` | Proxmox storage for the LXC |
+| `BRIDGE` | `vmbr0` | Network bridge |
 
-### Enregistrement du runner
+#### Runner registration
 
-Après installation, entrer dans le LXC et enregistrer le runner :
+After installation, enter the LXC and register the runner:
 
 ```bash
 pct enter <CTID>
@@ -51,20 +51,20 @@ su -s /bin/bash gitea-runner -c "act_runner register"
 rc-service gitea-runner start
 ```
 
-### Mise à jour
+#### Update
 
-Depuis l'intérieur du LXC :
+From inside the LXC:
 
 ```bash
 curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh | bash
 ```
 
-Le script détecte que act_runner est déjà installé et passe en mode update automatiquement.
+The script detects that act_runner is already installed and switches to update mode automatically.
 
-## Architecture
+### Architecture
 
-- **OS** : Alpine 3.23 (LXC non-privilegié, nesting activé)
-- **Docker** : installé via apk, service OpenRC
-- **act_runner** : binaire officiel depuis gitea.com/gitea/act_runner
-- **Service** : OpenRC avec logs dans `/var/log/gitea-runner.log`
-- **Utilisateur** : `gitea-runner` (groupe `docker`)
+- **OS**: Alpine 3.23 (LXC non-privileged, nesting active)
+- **Docker**: installed via apk, OpenRC service
+- **act_runner**: official binary from gitea.com/gitea/act_runner
+- **Service**: OpenRC with logs in `/var/log/gitea-runner.log`
+- **User**: `gitea-runner` (group `docker`)
