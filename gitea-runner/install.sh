@@ -143,6 +143,11 @@ install_runner() {
   log_info "Installing dependencies..."
   apk add --no-cache curl jq tar bash docker docker-cli-compose > /dev/null
 
+  log_info "Installing Tailscale..."
+  apk add --no-cache tailscale > /dev/null
+  rc-update add tailscale default > /dev/null 2>&1
+  rc-service tailscale start > /dev/null 2>&1
+
   log_info "Starting Docker..."
   rc-update add docker default > /dev/null 2>&1
   rc-service docker start > /dev/null 2>&1
@@ -175,8 +180,8 @@ output_log="/var/log/gitea-runner.log"
 error_log="/var/log/gitea-runner.log"
 
 depend() {
-    need net docker
-    after docker
+    need net docker tailscale
+    after docker tailscale
 }
 
 start_pre() {
@@ -202,6 +207,9 @@ EOF
   log_info "========================================="
   log_info "Installation complete!"
   log_info "========================================="
+  echo ""
+  echo "Connect to Tailscale first:"
+  echo "  tailscale up --ssh"
   echo ""
   echo "Register the runner:"
   echo "  cd /var/lib/gitea-runner"
