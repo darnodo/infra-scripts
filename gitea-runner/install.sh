@@ -96,8 +96,9 @@ create_lxc() {
     --features nesting=1,keyctl=1 \
     --start 0
 
-  log_info "Enabling TUN/TAP device for Tailscale..."
+  log_info "Configuring LXC for Docker and Tailscale..."
   cat >> "/etc/pve/lxc/${CTID}.conf" <<EOF
+lxc.apparmor.profile: unconfined
 lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net dev/net none bind,create=dir
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
