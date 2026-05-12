@@ -57,7 +57,7 @@ download_runner() {
   local version="${release#v}"
   local arch
   arch=$(get_arch)
-  local url="https://gitea.com/gitea/act_runner/releases/download/${release}/act_runner-${version}-linux-${arch}"
+  local url="https://gitea.com/gitea/act_runner/releases/download/${release}/gitea-runner-${version}-linux-${arch}"
 
   log_info "Downloading act_runner ${release} (${arch})..."
   curl -fsSL "$url" -o /usr/local/bin/act_runner
