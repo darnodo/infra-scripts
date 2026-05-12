@@ -94,6 +94,7 @@ create_lxc() {
     --net0 "name=eth0,bridge=${BRIDGE},ip=dhcp" \
     --unprivileged 1 \
     --features nesting=1,keyctl=1 \
+    --tags "infra-script,cicd" \
     --start 0
 
   log_info "Configuring LXC for Docker and Tailscale..."
@@ -163,6 +164,12 @@ install_runner() {
   mkdir -p /var/lib/gitea-runner
   chown -R gitea-runner:docker /var/lib/gitea-runner
 
+  log_info "Generating act_runner config with Prometheus metrics enabled..."
+  act_runner generate-config > /var/lib/gitea-runner/config.yaml
+  sed -i '/^metrics:/,/enabled:/{s/enabled: false/enabled: true/}' /var/lib/gitea-runner/config.yaml
+  chown gitea-runner:docker /var/lib/gitea-runner/config.yaml
+  chmod 640 /var/lib/gitea-runner/config.yaml
+
   log_info "Creating OpenRC service..."
   cat <<'EOF' > /etc/init.d/gitea-runner
 #!/sbin/openrc-run
@@ -170,7 +177,7 @@ install_runner() {
 name="Gitea Act Runner"
 description="Gitea Actions Runner Daemon"
 command="/usr/local/bin/act_runner"
-command_args="daemon"
+command_args="daemon --config /var/lib/gitea-runner/config.yaml"
 command_user="gitea-runner:docker"
 command_background=true
 pidfile="/run/${RC_SVCNAME}.pid"
@@ -192,6 +199,22 @@ start_pre() {
 EOF
   chmod +x /etc/init.d/gitea-runner
   rc-update add gitea-runner default > /dev/null
+
+  log_info "Configuring logrotate for gitea-runner..."
+  apk add --no-cache logrotate > /dev/null
+
+  cat > /etc/logrotate.d/gitea-runner << 'LOGROTATE'
+/var/log/gitea-runner.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+LOGROTATE
+
+  ln -sf /usr/sbin/logrotate /etc/periodic/daily/logrotate 2>/dev/null || true
 
   log_info "Enabling console auto-login..."
   mkdir -p /etc/conf.d
