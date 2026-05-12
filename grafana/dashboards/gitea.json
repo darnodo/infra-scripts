@@ -1,0 +1,463 @@
+{
+  "description": "Monitor Gitea server and Gitea Actions runner",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "General",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "continuous-BlPu" },
+          "custom": {
+            "drawStyle": "line", "fillOpacity": 70, "gradientMode": "opacity",
+            "lineWidth": 0, "showPoints": "never", "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 1 },
+      "id": 31,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false }, "tooltip": { "mode": "none" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "process_resident_memory_bytes{job=\"gitea\"}",
+          "legendFormat": "RSS Memory",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Memory Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "continuous-BlPu" },
+          "custom": {
+            "drawStyle": "line", "fillOpacity": 70, "gradientMode": "opacity",
+            "lineWidth": 0, "showPoints": "never"
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 1 },
+      "id": 32,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false }, "tooltip": { "mode": "none" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "irate(process_cpu_seconds_total{job=\"gitea\"}[5m])",
+          "legendFormat": "CPU",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] }, "unit": "dtdurations" }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 0, "y": 8 },
+      "id": 34,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "time() - max(process_start_time_seconds{job=\"gitea\"})",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Uptime",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 4, "y": 8 },
+      "id": 21,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_organizations", "refId": "A" }],
+      "title": "Organizations",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 8 },
+      "id": 24,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_users", "refId": "A" }],
+      "title": "Users",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 8 },
+      "id": 18,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_repositories", "refId": "A" }],
+      "title": "Repositories",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 16, "y": 8 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_issues_open", "range": true, "refId": "A" }],
+      "title": "Issues Open",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 20, "y": 8 },
+      "id": 35,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_issues_closed", "range": true, "refId": "A" }],
+      "title": "Issues Closed",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 0, "y": 11 },
+      "id": 19,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_releases", "refId": "A" }],
+      "title": "Releases",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 4, "y": 11 },
+      "id": 16,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_teams", "refId": "A" }],
+      "title": "Teams",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 11 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_milestones", "refId": "A" }],
+      "title": "Milestones",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 11 },
+      "id": 17,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_stars", "refId": "A" }],
+      "title": "Stars",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 16, "y": 11 },
+      "id": 7,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_comments", "refId": "A" }],
+      "title": "Comments",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] } }, "overrides": [] },
+      "gridPos": { "h": 3, "w": 4, "x": 20, "y": 11 },
+      "id": 10,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" }, "expr": "gitea_labels", "refId": "A" }],
+      "title": "Labels",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 200,
+      "title": "Issues",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "gradientMode": "opacity", "lineWidth": 1, "showPoints": "never" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 15 },
+      "id": 41,
+      "options": { "legend": { "calcs": ["last"], "displayMode": "table", "placement": "right", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "gitea_issues_by_repository",
+          "legendFormat": "{{repository}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Issues by Repository",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "gradientMode": "opacity", "lineWidth": 1, "showPoints": "never" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 15 },
+      "id": 42,
+      "options": { "legend": { "calcs": ["last"], "displayMode": "table", "placement": "right", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "gitea_issues_by_label",
+          "legendFormat": "{{label}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Issues by Label",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 300,
+      "title": "Gitea Actions Runner",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 3, "w": 4, "x": 0, "y": 25 },
+      "id": 301,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "gitea_runner_capacity{job=\"gitea-runner\"}",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Max Concurrent Jobs",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "max": 1, "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "orange", "value": 0.7 },
+              { "color": "red", "value": 0.9 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 25 },
+      "id": 302,
+      "options": {
+        "minVizHeight": 75, "minVizWidth": 75,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "gitea_runner_job_capacity_utilization_ratio{job=\"gitea-runner\"}",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Capacity Utilization",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": 0 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 3, "w": 4, "x": 0, "y": 28 },
+      "id": 303,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "gitea_runner_job_running{job=\"gitea-runner\"}",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Running Jobs",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "bars", "fillOpacity": 80, "lineWidth": 1, "showPoints": "never", "stacking": { "group": "A", "mode": "normal" } },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byLabelValue", "options": { "label": "status", "op": "=", "value": "failure" } }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byLabelValue", "options": { "label": "status", "op": "=", "value": "success" } }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 9, "w": 16, "x": 8, "y": 25 },
+      "id": 304,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "increase(gitea_runner_job_total{job=\"gitea-runner\"}[5m])",
+          "legendFormat": "{{status}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Jobs by Status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "gradientMode": "opacity", "lineWidth": 2, "showPoints": "never" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "id": 305,
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "histogram_quantile(0.50, rate(gitea_runner_job_duration_seconds_bucket{job=\"gitea-runner\"}[10m]))",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "histogram_quantile(0.90, rate(gitea_runner_job_duration_seconds_bucket{job=\"gitea-runner\"}[10m]))",
+          "legendFormat": "p90",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "histogram_quantile(0.99, rate(gitea_runner_job_duration_seconds_bucket{job=\"gitea-runner\"}[10m]))",
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Job Duration (p50 / p90 / p99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "continuous-BlPu" },
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 0, "showPoints": "never" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "id": 306,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "aflu2t514uf40a" },
+          "expr": "increase(gitea_runner_poll_fetch_total{job=\"gitea-runner\"}[5m])",
+          "legendFormat": "polls",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Runner Poll Activity (per 5m)",
+      "type": "timeseries"
+    }
+  ],
+  "preload": false,
+  "refresh": "1m",
+  "schemaVersion": 42,
+  "tags": ["gitea", "prometheus", "homelab"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Gitea + Actions",
+  "uid": "gitea-homelab-01",
+  "version": 1,
+  "weekStart": ""
+}
