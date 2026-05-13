@@ -1,5 +1,5 @@
 #!/bin/bash
-# install.sh - Automated deployment of Proxy Server with Tailscale + Nginx Proxy Manager
+# install.sh - Automated deployment of Proxy Server with Tailscale + Traefik v3 + Fail2ban
 # Usage: curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/proxy/install.sh | bash
 
 set -euo pipefail
@@ -34,14 +34,30 @@ check_debian() {
 
 # Configuration variables (can be overridden via environment)
 HOSTNAME="${PROXY_HOSTNAME:-proxy}"
-NPM_DIR="$HOME/npm"
+TRAEFIK_DIR="$HOME/traefik"
 TIMEZONE="${TZ:-Europe/Paris}"
 
+# INFOMANIAK_ACCESS_TOKEN must be set in the environment or will be prompted.
+# WARNING: Without this token, Traefik cannot issue certificates via DNS challenge.
+# Export it before running: export INFOMANIAK_ACCESS_TOKEN=your_token_here
+INFOMANIAK_ACCESS_TOKEN="${INFOMANIAK_ACCESS_TOKEN:-}"
+
 main() {
-    log_info "=== Proxy Server Deployment ==="
-    
+    log_info "=== Proxy Server Deployment (Traefik v3) ==="
+
     check_root
     check_debian
+
+    # Prompt for token if not set
+    if [[ -z "$INFOMANIAK_ACCESS_TOKEN" ]]; then
+        log_warn "INFOMANIAK_ACCESS_TOKEN is not set in the environment."
+        read -rsp "Enter your Infomaniak API token: " INFOMANIAK_ACCESS_TOKEN
+        echo
+        if [[ -z "$INFOMANIAK_ACCESS_TOKEN" ]]; then
+            log_error "Token is required for DNS challenge certificate issuance. Aborting."
+            exit 1
+        fi
+    fi
 
     log_info "Setting hostname to: $HOSTNAME"
     echo "$HOSTNAME" | sudo tee /etc/hostname > /dev/null
@@ -69,59 +85,144 @@ main() {
     sudo apt update -qq
     sudo apt install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin > /dev/null
 
+    log_info "Adding current user to docker group..."
+    sudo usermod -aG docker "$USER"
+
     log_info "Configuring UFW firewall..."
     sudo ufw --force reset > /dev/null
     sudo ufw default deny incoming > /dev/null
     sudo ufw default allow outgoing > /dev/null
-    # Allow HTTP/HTTPS from public internet
+    # Allow HTTP/HTTPS from the public internet (handled by Traefik)
     sudo ufw allow 80/tcp > /dev/null
     sudo ufw allow 443/tcp > /dev/null
-    # Allow all traffic on Tailscale interface (SSH, admin, etc.)
+    # Allow all traffic on Tailscale interface (dashboard, metrics, SSH, admin — everything internal)
     sudo ufw allow in on tailscale0 > /dev/null
-    # Temporarily allow SSH during setup (safety net)
-    sudo ufw allow 22/tcp > /dev/null
+    # Port 22 is intentionally NOT opened publicly; Tailscale SSH covers management access
     sudo ufw --force enable > /dev/null
 
-    # Schedule SSH rule removal in 5 minutes
-    log_warn "SSH port 22 temporarily open for 5 minutes (safety net)."
-    log_warn "Verify Tailscale SSH access works, then wait or run: sudo ufw delete allow 22/tcp"
-    echo "sudo ufw delete allow 22/tcp && logger 'UFW: SSH port 22 closed by scheduled task'" | sudo at now + 5 minutes 2>/dev/null || {
-        log_warn "Could not schedule automatic SSH cleanup. Run manually after verification:"
-        log_warn "  sudo ufw delete allow 22/tcp"
-    }
+    log_info "Creating Traefik stack under $TRAEFIK_DIR..."
+    mkdir -p "$TRAEFIK_DIR/conf.d"
 
-    log_info "Creating NPM stack..."
-    mkdir -p "$NPM_DIR"
-    cat > "$NPM_DIR/docker-compose.yml" << EOF
+    # acme.json must be 600 or Traefik refuses to use it
+    touch "$TRAEFIK_DIR/acme.json"
+    chmod 600 "$TRAEFIK_DIR/acme.json"
+
+    # Host log directory (mounted into container so Fail2ban can parse access logs)
+    sudo mkdir -p /var/log/traefik
+    sudo chown "$USER":"$USER" /var/log/traefik
+
+    # Write .env so the token survives reboots without embedding it in compose
+    cat > "$TRAEFIK_DIR/.env" << EOF
+INFOMANIAK_ACCESS_TOKEN=${INFOMANIAK_ACCESS_TOKEN}
+EOF
+    chmod 600 "$TRAEFIK_DIR/.env"
+
+    # --- docker-compose.yml ---
+    cat > "$TRAEFIK_DIR/docker-compose.yml" << 'EOF'
 services:
-  npm:
-    image: jc21/nginx-proxy-manager:latest
-    container_name: nginx-proxy-manager
+  traefik:
+    image: traefik:v3
+    container_name: traefik
     restart: unless-stopped
     ports:
-      # Public ports for reverse proxy
       - "80:80"
       - "443:443"
-      # Admin port bound to localhost only (exposed via Tailscale serve)
-      - "127.0.0.1:81:81"
+      # Dashboard bound to localhost only; exposed via Tailscale serve
+      - "127.0.0.1:8080:8080"
     volumes:
-      - ./data:/data
-      - ./letsencrypt:/etc/letsencrypt
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./conf.d:/etc/traefik/conf.d:ro
+      - ./acme.json:/acme.json
+      - /var/log/traefik:/var/log/traefik
+      - /etc/localtime:/etc/localtime:ro
     environment:
-      - TZ=${TIMEZONE}
+      - INFOMANIAK_ACCESS_TOKEN=${INFOMANIAK_ACCESS_TOKEN}
+
+  fail2ban-exporter:
+    image: hectorjsmith/fail2ban-prometheus-exporter:latest
+    container_name: fail2ban-exporter
+    restart: unless-stopped
+    ports:
+      # Metrics reachable only via Tailscale (127.0.0.1 binding + UFW blocks public access)
+      - "127.0.0.1:9191:9191"
+    volumes:
+      - /var/run/fail2ban/fail2ban.sock:/var/run/fail2ban/fail2ban.sock
 EOF
 
-    log_info "Starting Nginx Proxy Manager..."
-    cd "$NPM_DIR"
-    docker compose up -d
+    # --- traefik.yml (static config) ---
+    cat > "$TRAEFIK_DIR/traefik.yml" << 'EOF'
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
 
-    log_info "Exposing NPM admin panel via Tailscale..."
-    sudo tailscale serve --bg http://localhost:81
+  websecure:
+    address: ":443"
 
-    # Configure MOTD
+  traefik:
+    address: ":8080"
+
+certificatesResolvers:
+  infomaniak:
+    acme:
+      storage: /acme.json
+      dnsChallenge:
+        provider: infomaniak
+
+providers:
+  file:
+    directory: /etc/traefik/conf.d
+    watch: true
+
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true
+    addRoutersLabels: true
+    entryPoint: traefik
+
+api:
+  dashboard: true
+  insecure: true
+
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: json
+EOF
+
+    # --- conf.d/gitea.yml (dynamic config) ---
+    cat > "$TRAEFIK_DIR/conf.d/gitea.yml" << 'EOF'
+http:
+  routers:
+    gitea:
+      rule: "Host(`gitea.arnodo.fr`)"
+      entryPoints:
+        - websecure
+      service: gitea
+      tls:
+        certResolver: infomaniak
+
+  services:
+    gitea:
+      loadBalancer:
+        servers:
+          - url: "http://gitea.taila5ad8.ts.net:3000"
+EOF
+
+    log_info "Starting Traefik stack..."
+    # Use sg to apply the docker group without requiring a re-login
+    sg docker -c "docker compose -f $TRAEFIK_DIR/docker-compose.yml up -d"
+
+    log_info "Exposing Traefik dashboard via Tailscale serve..."
+    sudo tailscale serve --bg http://localhost:8080
+
     log_info "Configuring MOTD..."
     sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
-    
+
     cat << 'MOTD' | sudo tee /etc/update-motd.d/00-proxy > /dev/null
 #!/bin/bash
 TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
@@ -135,26 +236,25 @@ echo " ____  ____   _____  ____   __"
 echo "|  _ \|  _ \ / _ \ \/ /\ \ / /"
 echo "| |_) | |_) | | | \  /  \ V /"
 echo "|  __/|  _ <| |_| /  \   | |"
-echo "|_|   |_| \_\\\\___/_/\_\  |_|"
+echo "|_|   |_| \_\\___/_/\_\  |_|"
 echo ""
-echo "Nginx Proxy Manager Server"
+echo "Traefik v3 Reverse Proxy"
 echo "─────────────────────────────────────────"
 echo "Access:"
-echo "  • Admin panel : https://${TS_FQDN} (Tailscale)"
-echo "  • HTTP/HTTPS  : Public ports 80/443"
+echo "  • Dashboard : https://${TS_FQDN} (Tailscale)"
+echo "  • HTTP/HTTPS: Public ports 80/443"
 echo ""
 echo "Services:"
 docker ps --format '  • {{.Names}} : {{.Status}}' 2>/dev/null || echo "  Docker not running"
 echo ""
 echo "Useful commands:"
-echo "  cd ~/npm && docker compose logs -f"
+echo "  cd ~/traefik && docker compose logs -f"
 echo "  sudo tailscale serve status"
 echo "─────────────────────────────────────────"
 echo ""
 MOTD
     sudo chmod +x /etc/update-motd.d/00-proxy
 
-    # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
         /"Self"/ { in_self=1 }
         in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
@@ -165,13 +265,12 @@ MOTD
     log_info "Deployment complete!"
     log_info "=========================================="
     echo ""
-    echo "Access NPM admin panel at: https://${TS_FQDN}"
-    echo "Default login: admin@example.com / changeme"
+    echo "Traefik dashboard : https://${TS_FQDN}"
+    echo "Stack directory   : $TRAEFIK_DIR"
     echo ""
-    echo "Note: Approve exit-node in Tailscale admin console if needed"
-    echo ""
-    log_warn "SSH port 22 will be closed in 5 minutes."
-    log_warn "To cancel: sudo atq (list jobs) then sudo atrm <job-number>"
+    echo "Note: Approve exit-node in Tailscale admin console if needed."
+    echo "Note: Fail2ban is running on the host; fail2ban-exporter exposes"
+    echo "      metrics on port 9191 (Tailscale-only, not public)."
     echo ""
 }
 
