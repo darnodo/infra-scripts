@@ -1,5 +1,5 @@
 #!/bin/bash
-# install.sh - Automated deployment of Proxy Server with Tailscale + Nginx Proxy Manager
+# install.sh - Automated deployment of Proxy Server with Tailscale + Traefik v3 + Fail2ban
 # Usage: curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/proxy/install.sh | bash
 
 set -euo pipefail
@@ -33,34 +33,85 @@ check_debian() {
 }
 
 # Configuration variables (can be overridden via environment)
-HOSTNAME="${PROXY_HOSTNAME:-proxy}"
-NPM_DIR="$HOME/npm"
-TIMEZONE="${TZ:-Europe/Paris}"
+PROXY_HOSTNAME="${PROXY_HOSTNAME:-proxy}"
+TRAEFIK_DIR="$HOME/traefik"
+
+# ACME_EMAIL is required for Let's Encrypt certificate issuance notifications.
+# Export it before running: export ACME_EMAIL=you@example.com
+ACME_EMAIL="${ACME_EMAIL:-}"
+
+# Optional: pre-authorize Tailscale non-interactively (recommended for curl|bash).
+# Generate at https://login.tailscale.com/admin/settings/keys
+TS_AUTHKEY="${TS_AUTHKEY:-}"
 
 main() {
-    log_info "=== Proxy Server Deployment ==="
-    
+    log_info "=== Proxy Server Deployment (Traefik v3) ==="
+
     check_root
     check_debian
 
-    log_info "Setting hostname to: $HOSTNAME"
-    echo "$HOSTNAME" | sudo tee /etc/hostname > /dev/null
-    sudo hostnamectl set-hostname "$HOSTNAME"
+    # Prompt for ACME email if not set. Only attempt interactive prompt when a
+    # TTY is available — when invoked via `curl … | bash`, stdin is the pipe
+    # and reading from /dev/tty may also fail (e.g. non-interactive runners).
+    if [[ -z "$ACME_EMAIL" ]]; then
+        if [[ -r /dev/tty ]]; then
+            log_warn "ACME_EMAIL is not set in the environment."
+            read -rp "Enter your ACME email address: " ACME_EMAIL < /dev/tty || true
+        fi
+        if [[ -z "$ACME_EMAIL" ]]; then
+            log_error "ACME_EMAIL is required. Export it before running:"
+            log_error "  export ACME_EMAIL=you@example.com"
+            exit 1
+        fi
+    fi
+
+    if [[ "$(hostname)" != "$PROXY_HOSTNAME" ]]; then
+        log_info "Setting hostname to: $PROXY_HOSTNAME"
+        echo "$PROXY_HOSTNAME" | sudo tee /etc/hostname > /dev/null
+        sudo hostnamectl set-hostname "$PROXY_HOSTNAME"
+    else
+        log_info "Hostname already set to $PROXY_HOSTNAME, skipping."
+    fi
 
     log_info "Installing base packages..."
     sudo apt update -qq
-    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades at ufw > /dev/null
+    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades ufw ethtool networkd-dispatcher > /dev/null
 
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
-
-    log_info "Connecting to Tailscale..."
-    sudo tailscale up --ssh --advertise-exit-node
 
     log_info "Configuring sysctl for exit-node support..."
     echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-tailscale.conf > /dev/null
     echo 'net.ipv6.conf.all.forwarding = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf > /dev/null
     sudo sysctl -p /etc/sysctl.d/99-tailscale.conf > /dev/null
+
+    log_info "Configuring ethtool for Tailscale UDP GRO forwarding..."
+    # Determine the default-route interface and disable rx-gro-list / enable
+    # rx-udp-gro-forwarding to avoid the Tailscale throughput warning.
+    NETDEV=$(ip -o route show default | awk '{print $5; exit}')
+    if [[ -z "$NETDEV" ]]; then
+        log_error "Could not determine default network interface."
+        exit 1
+    fi
+    sudo ethtool -K "$NETDEV" rx-udp-gro-forwarding on rx-gro-list off
+    # Persist across reboots via networkd-dispatcher
+    sudo mkdir -p /etc/networkd-dispatcher/routable.d
+    printf '#!/bin/sh\nethtool -K %s rx-udp-gro-forwarding on rx-gro-list off\n' "$NETDEV" \
+        | sudo tee /etc/networkd-dispatcher/routable.d/50-tailscale > /dev/null
+    sudo chmod 755 /etc/networkd-dispatcher/routable.d/50-tailscale
+
+    # Connect to Tailscale only if not already logged in (idempotent re-runs).
+    if ! sudo tailscale status >/dev/null 2>&1; then
+        log_info "Connecting to Tailscale..."
+        if [[ -n "$TS_AUTHKEY" ]]; then
+            sudo tailscale up --ssh --advertise-exit-node --authkey="$TS_AUTHKEY"
+        else
+            log_warn "TS_AUTHKEY not set — interactive browser auth required."
+            sudo tailscale up --ssh --advertise-exit-node
+        fi
+    else
+        log_info "Tailscale already connected, skipping."
+    fi
 
     log_info "Installing Docker..."
     sudo mkdir -m 0755 -p /etc/apt/keyrings
@@ -69,61 +120,195 @@ main() {
     sudo apt update -qq
     sudo apt install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin > /dev/null
 
+    log_info "Adding current user to docker group..."
+    sudo usermod -aG docker "$USER"
+
     log_info "Configuring UFW firewall..."
-    sudo ufw --force reset > /dev/null
-    sudo ufw default deny incoming > /dev/null
-    sudo ufw default allow outgoing > /dev/null
-    # Allow HTTP/HTTPS from public internet
-    sudo ufw allow 80/tcp > /dev/null
-    sudo ufw allow 443/tcp > /dev/null
-    # Allow all traffic on Tailscale interface (SSH, admin, etc.)
-    sudo ufw allow in on tailscale0 > /dev/null
-    # Temporarily allow SSH during setup (safety net)
-    sudo ufw allow 22/tcp > /dev/null
-    sudo ufw --force enable > /dev/null
+    # Idempotent: only reset if our marker rules are absent. This preserves any
+    # rules added later by the operator on re-runs.
+    if ! sudo ufw status | grep -q "tailscale0"; then
+        sudo ufw --force reset > /dev/null
+        sudo ufw default deny incoming > /dev/null
+        sudo ufw default allow outgoing > /dev/null
+        # Allow HTTP/HTTPS from the public internet (handled by Traefik)
+        sudo ufw allow 80/tcp > /dev/null
+        sudo ufw allow 443/tcp > /dev/null
+        # Allow all traffic on Tailscale interface (dashboard, metrics, SSH, admin — everything internal)
+        sudo ufw allow in on tailscale0 > /dev/null
+        # Port 22 is intentionally NOT opened publicly; Tailscale SSH covers management access
+        sudo ufw --force enable > /dev/null
+    else
+        log_info "UFW already configured, skipping reset."
+    fi
 
-    # Schedule SSH rule removal in 5 minutes
-    log_warn "SSH port 22 temporarily open for 5 minutes (safety net)."
-    log_warn "Verify Tailscale SSH access works, then wait or run: sudo ufw delete allow 22/tcp"
-    echo "sudo ufw delete allow 22/tcp && logger 'UFW: SSH port 22 closed by scheduled task'" | sudo at now + 5 minutes 2>/dev/null || {
-        log_warn "Could not schedule automatic SSH cleanup. Run manually after verification:"
-        log_warn "  sudo ufw delete allow 22/tcp"
-    }
+    log_info "Configuring Fail2ban for Traefik..."
+    # Create the log file and fail2ban socket dir now so:
+    #  - fail2ban can open the log file when the jail loads.
+    #  - docker doesn't bind-mount /var/run/fail2ban as an empty dir if the
+    #    exporter container starts before fail2ban writes its socket.
+    sudo mkdir -p /var/log/traefik /var/run/fail2ban
+    sudo chown "$USER":"$USER" /var/log/traefik
+    sudo touch /var/log/traefik/access.log
 
-    log_info "Creating NPM stack..."
-    mkdir -p "$NPM_DIR"
-    cat > "$NPM_DIR/docker-compose.yml" << EOF
-services:
-  npm:
-    image: jc21/nginx-proxy-manager:latest
-    container_name: nginx-proxy-manager
-    restart: unless-stopped
-    ports:
-      # Public ports for reverse proxy
-      - "80:80"
-      - "443:443"
-      # Admin port bound to localhost only (exposed via Tailscale serve)
-      - "127.0.0.1:81:81"
-    volumes:
-      - ./data:/data
-      - ./letsencrypt:/etc/letsencrypt
-    environment:
-      - TZ=${TIMEZONE}
+    sudo tee /etc/fail2ban/filter.d/traefik.conf > /dev/null << 'EOF'
+[Definition]
+# Match JSON log lines where ClientHost is the offending IP and DownstreamStatus
+# is an auth/abuse status (401, 403, 429) or a server error (5xx).
+# Legitimate 404s on missing assets are excluded so dev traffic doesn't ban users.
+# Two patterns cover both possible field orderings in the JSON.
+failregex = ^.*"ClientHost":"<HOST>".*"DownstreamStatus":(401|403|429|5[0-9]{2})
+            ^.*"DownstreamStatus":(401|403|429|5[0-9]{2}).*"ClientHost":"<HOST>"
+ignoreregex =
 EOF
 
-    log_info "Starting Nginx Proxy Manager..."
-    cd "$NPM_DIR"
-    docker compose up -d
+    sudo tee /etc/fail2ban/jail.d/traefik.conf > /dev/null << 'EOF'
+[traefik-auth]
+enabled  = true
+filter   = traefik
+logpath  = /var/log/traefik/access.log
+maxretry = 10
+findtime = 5m
+bantime  = 1h
+action   = iptables-multiport[name=traefik, port="80,443", protocol=tcp]
+EOF
 
-    log_info "Exposing NPM admin panel via Tailscale..."
-    sudo tailscale serve --bg http://localhost:81
+    sudo systemctl restart fail2ban
 
-    # Configure MOTD
+    log_info "Creating Traefik stack under $TRAEFIK_DIR..."
+    mkdir -p "$TRAEFIK_DIR/conf.d"
+
+    # acme.json must be 600 or Traefik refuses to use it
+    touch "$TRAEFIK_DIR/acme.json"
+    chmod 600 "$TRAEFIK_DIR/acme.json"
+
+    # --- docker-compose.yml ---
+    # SECURITY: The dashboard/API entrypoint is bound to 127.0.0.1 ONLY.
+    # Combined with `api.insecure: true` in traefik.yml, the dashboard has no
+    # authentication — it is only reachable via the host loopback and exposed
+    # selectively over the tailnet through `tailscale serve`. DO NOT change
+    # this port binding to 0.0.0.0 or any non-loopback address.
+    cat > "$TRAEFIK_DIR/docker-compose.yml" << 'EOF'
+services:
+  traefik:
+    image: traefik:v3
+    container_name: traefik
+    restart: unless-stopped
+    dns:
+      - 100.100.100.100
+    ports:
+      - "80:80"
+      - "443:443"
+      # MUST stay on 127.0.0.1: dashboard is unauthenticated (see traefik.yml).
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./conf.d:/etc/traefik/conf.d:ro
+      - ./acme.json:/acme.json
+      - /var/log/traefik:/var/log/traefik
+      - /etc/localtime:/etc/localtime:ro
+
+  fail2ban-exporter:
+    image: registry.gitlab.com/hctrdev/fail2ban-prometheus-exporter:latest
+    container_name: fail2ban-exporter
+    restart: unless-stopped
+    user: root
+    ports:
+      # Metrics reachable only via Tailscale (127.0.0.1 binding + UFW blocks public access)
+      - "127.0.0.1:9191:9191"
+    volumes:
+      # Mount the directory, not the socket file: avoids Docker creating a directory
+      # at the path when fail2ban is briefly down and recreating its socket.
+      - /var/run/fail2ban:/var/run/fail2ban
+EOF
+
+    # --- traefik.yml (static config) ---
+    # Unquoted EOF: ${ACME_EMAIL} must expand at write time into the static config.
+    cat > "$TRAEFIK_DIR/traefik.yml" << EOF
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: ":443"
+
+  traefik:
+    address: ":8080"
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "${ACME_EMAIL}"
+      storage: /acme.json
+      httpChallenge:
+        entryPoint: web
+
+providers:
+  file:
+    directory: /etc/traefik/conf.d
+    watch: true
+
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true
+    addRoutersLabels: true
+    entryPoint: traefik
+
+api:
+  dashboard: true
+  # insecure exposes the dashboard on the :8080 entrypoint without auth.
+  # This is acceptable ONLY because docker-compose.yml binds 8080 to 127.0.0.1.
+  # Public reach requires going through `tailscale serve` (tailnet-authenticated).
+  insecure: true
+
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: json
+EOF
+
+    # --- conf.d/gitea.yml (dynamic config) ---
+    cat > "$TRAEFIK_DIR/conf.d/gitea.yml" << 'EOF'
+http:
+  routers:
+    gitea:
+      rule: "Host(`gitea.arnodo.fr`)"
+      entryPoints:
+        - websecure
+      service: gitea
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    gitea:
+      loadBalancer:
+        servers:
+          - url: "http://gitea.taila5ad8.ts.net:3000"
+EOF
+
+    log_info "Starting Traefik stack..."
+    # Use sg to apply the docker group without requiring a re-login.
+    # cd into the dir so paths inside the command don't break on spaces in $HOME.
+    (cd "$TRAEFIK_DIR" && sg docker -c "docker compose up -d")
+
+    # Idempotent: only register the serve mapping if it isn't already present.
+    # Use --json (stable contract) and capture stdout+stderr so any help/error
+    # output on older tailscale builds doesn't leak to the user's terminal.
+    if ! sudo tailscale serve status --json 2>&1 | grep -q '"127.0.0.1:8080"'; then
+        log_info "Exposing Traefik dashboard via Tailscale serve..."
+        sudo tailscale serve --bg http://localhost:8080
+    else
+        log_info "Tailscale serve already configured for dashboard, skipping."
+    fi
+
     log_info "Configuring MOTD..."
-    sudo chmod -x /etc/update-motd.d/* 2>/dev/null || true
-    
-    cat << 'MOTD' | sudo tee /etc/update-motd.d/00-proxy > /dev/null
-#!/bin/bash
+    # /etc/profile.d/ runs for every interactive login shell regardless of the SSH
+    # implementation (works for both Tailscale SSH and regular OpenSSH).
+    cat << 'MOTD' | sudo tee /etc/profile.d/00-proxy.sh > /dev/null
 TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
     /"Self"/ { in_self=1 }
     in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
@@ -135,43 +320,40 @@ echo " ____  ____   _____  ____   __"
 echo "|  _ \|  _ \ / _ \ \/ /\ \ / /"
 echo "| |_) | |_) | | | \  /  \ V /"
 echo "|  __/|  _ <| |_| /  \   | |"
-echo "|_|   |_| \_\\\\___/_/\_\  |_|"
+echo "|_|   |_| \_\\___/_/\_\  |_|"
 echo ""
-echo "Nginx Proxy Manager Server"
+echo "Traefik v3 Reverse Proxy"
 echo "─────────────────────────────────────────"
 echo "Access:"
-echo "  • Admin panel : https://${TS_FQDN} (Tailscale)"
-echo "  • HTTP/HTTPS  : Public ports 80/443"
+echo "  • Dashboard : https://${TS_FQDN} (Tailscale)"
+echo "  • HTTP/HTTPS: Public ports 80/443"
 echo ""
 echo "Services:"
 docker ps --format '  • {{.Names}} : {{.Status}}' 2>/dev/null || echo "  Docker not running"
 echo ""
 echo "Useful commands:"
-echo "  cd ~/npm && docker compose logs -f"
+echo "  cd ~/traefik && docker compose logs -f"
 echo "  sudo tailscale serve status"
 echo "─────────────────────────────────────────"
 echo ""
 MOTD
-    sudo chmod +x /etc/update-motd.d/00-proxy
 
-    # Get Tailscale hostname for display
     TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
         /"Self"/ { in_self=1 }
         in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
-    ' || echo "${HOSTNAME}.ts.net")
+    ' || echo "${PROXY_HOSTNAME}.ts.net")
 
     echo ""
     log_info "=========================================="
     log_info "Deployment complete!"
     log_info "=========================================="
     echo ""
-    echo "Access NPM admin panel at: https://${TS_FQDN}"
-    echo "Default login: admin@example.com / changeme"
+    echo "Traefik dashboard : https://${TS_FQDN}"
+    echo "Stack directory   : $TRAEFIK_DIR"
     echo ""
-    echo "Note: Approve exit-node in Tailscale admin console if needed"
-    echo ""
-    log_warn "SSH port 22 will be closed in 5 minutes."
-    log_warn "To cancel: sudo atq (list jobs) then sudo atrm <job-number>"
+    echo "Note: Approve exit-node in Tailscale admin console if needed."
+    echo "Note: Fail2ban is running on the host; fail2ban-exporter exposes"
+    echo "      metrics on port 9191 (Tailscale-only, not public)."
     echo ""
 }
 
