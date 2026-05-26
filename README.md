@@ -21,11 +21,10 @@ These scripts automate the deployment of personal infrastructure components. The
 | ------------------------------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | [`proxy/install.sh`](proxy/)               | Reverse proxy with Tailscale + Nginx Proxy Manager | `curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/proxy/install.sh` \| `bash`                    |
 | [`netlab/install.sh`](netlab/)             | Network lab with ContainerLab                      | `curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/netlab/install.sh` \| `bash`                   |
-| [`seedbox/install.sh`](seedbox/)           | ISO seedbox with Transmission + NFS                | `NFS_SERVER=<nas> curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/seedbox/install.sh` \| `bash` |
 | [`gitea-runner/install.sh`](gitea-runner/) | Gitea Act Runner on Alpine LXC (Proxmox)           | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh)"`          |
 
 ### Requirements
 
-- Fresh Debian 12/13 installation (proxy, netlab, seedbox) or Proxmox VE host (gitea-runner)
+- Fresh Debian 12/13 installation (proxy, netlab) or Proxmox VE host (gitea-runner)
 - User with sudo privileges (do not run as root) — except gitea-runner which runs as root on Proxmox
 - Internet access
