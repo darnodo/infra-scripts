@@ -119,12 +119,12 @@ install_or_upgrade_bao() {
   log_info "Downloading OpenBao ${tag} (${arch}) from ${url}..."
 
   tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' RETURN
   curl -fsSL "$url" -o "${tmpdir}/bao.tar.gz"
   tar -xzf "${tmpdir}/bao.tar.gz" -C "$tmpdir"
 
   if [[ ! -f "${tmpdir}/bao" ]]; then
     log_error "Archive did not contain expected 'bao' binary."
+    rm -rf "$tmpdir"
     exit 1
   fi
 
@@ -149,6 +149,8 @@ install_or_upgrade_bao() {
     log_info "Restarting openbao service..."
     rc-service openbao start
   fi
+
+  rm -rf "$tmpdir"
 }
 
 # ============================================================
