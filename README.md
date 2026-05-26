@@ -10,6 +10,9 @@ These scripts automate the deployment of personal infrastructure components. The
 - **Idempotent-ish**: Safe to re-run (where possible)
 - **Curl-friendly**: Designed for one-liner deployment from a fresh server
 - **Multi-OS**: Supports Debian and Alpine-based deployments
+- **Loopback by default**: Services bind to `127.0.0.1`; Tailscale handles the reverse proxy and TLS termination
+- **Log hygiene**: Every long-running service ships with a `logrotate` config (no unbounded log files)
+- **Keep it simple**: One script per service, plain bash, no frameworks — readability over cleverness
 
 ### Available Scripts
 
