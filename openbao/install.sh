@@ -488,6 +488,11 @@ EOF
   # Tell PID 1 to re-read /etc/inittab so the change takes effect without a reboot.
   kill -HUP 1 2>/dev/null || true
 
+  # Kick any getty/agetty still attached to tty1 so init respawns it *now* with
+  # the new line — otherwise the first web-console session lands on the stale
+  # process and the operator has to type `exit` once before autologin kicks in.
+  pkill -KILL -f '(getty|agetty).*tty1' 2>/dev/null || true
+
   configure_tailscale_proxy
 
   log_info "Configuring MOTD..."
