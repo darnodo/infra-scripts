@@ -26,7 +26,8 @@ DISK="${DISK:-8}"
 BRIDGE="${BRIDGE:-vmbr0}"
 LXC_TAG="${LXC_TAG:-openbao}"                     # stable identifier for the container
 OPENBAO_VERSION="${OPENBAO_VERSION:-latest}"      # "latest" or e.g. "v2.0.3"
-OPENBAO_API="https://api.github.com/repos/openbao/openbao/releases"
+# GitHub releases endpoint for the openbao/openbao repo (used to resolve "latest").
+OPENBAO_RELEASES_URL="${OPENBAO_RELEASES_URL:-https://api.github.com/repos/openbao/openbao/releases}"
 OPENBAO_LISTEN_ADDR="${OPENBAO_LISTEN_ADDR:-127.0.0.1:8200}"
 # Public API address advertised to clients (also used for OIDC / UI redirects).
 # Defaults to the local listener; override with the tailnet URL once known,
@@ -82,7 +83,7 @@ resolve_openbao_version() {
     return 0
   fi
   local tag
-  tag=$(curl -fsSL "${OPENBAO_API}/latest" | jq -r '.tag_name')
+  tag=$(curl -fsSL "${OPENBAO_RELEASES_URL}/latest" | jq -r '.tag_name')
   if [[ -z "$tag" || "$tag" == "null" ]]; then
     log_error "Failed to resolve latest OpenBao release from GitHub API."
     exit 1
