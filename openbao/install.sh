@@ -67,10 +67,12 @@ require_root() {
   fi
 }
 
+# OpenBao publishes release assets named with the raw `uname -m` arch
+# (e.g. x86_64, aarch64), not Go-style amd64/arm64.
 get_arch() {
   case "$(uname -m)" in
-    x86_64)  echo "amd64" ;;
-    aarch64) echo "arm64" ;;
+    x86_64)  echo "x86_64" ;;
+    aarch64) echo "aarch64" ;;
     *)       log_error "Unsupported architecture: $(uname -m)"; exit 1 ;;
   esac
 }
@@ -112,14 +114,14 @@ install_or_upgrade_bao() {
     return 0
   fi
 
-  # OpenBao publishes zip archives named bao_<version>_linux_<arch>.zip
-  url="https://github.com/openbao/openbao/releases/download/${tag}/bao_${version}_linux_${arch}.zip"
+  # Asset naming convention: bao_<version>_Linux_<arch>.tar.gz
+  url="https://github.com/openbao/openbao/releases/download/${tag}/bao_${version}_Linux_${arch}.tar.gz"
   log_info "Downloading OpenBao ${tag} (${arch}) from ${url}..."
 
   tmpdir=$(mktemp -d)
   trap 'rm -rf "$tmpdir"' RETURN
-  curl -fsSL "$url" -o "${tmpdir}/bao.zip"
-  unzip -q -o "${tmpdir}/bao.zip" -d "$tmpdir"
+  curl -fsSL "$url" -o "${tmpdir}/bao.tar.gz"
+  tar -xzf "${tmpdir}/bao.tar.gz" -C "$tmpdir"
 
   if [[ ! -f "${tmpdir}/bao" ]]; then
     log_error "Archive did not contain expected 'bao' binary."
@@ -258,7 +260,7 @@ exec_in_lxc() {
   local mode="$2"   # --install or --update
 
   # Ensure base tooling exists inside the container before piping the script.
-  pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq unzip ca-certificates >/dev/null 2>&1"
+  pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq ca-certificates >/dev/null 2>&1"
   curl -fsSL "$SCRIPT_URL" \
     | pct exec "$ctid" --  env \
         SCRIPT_URL="$SCRIPT_URL" \
@@ -378,8 +380,7 @@ install_inside_lxc() {
   apk upgrade >/dev/null
 
   log_info "Installing dependencies..."
-  # gcompat: OpenBao binaries are glibc-built; gcompat is required on musl Alpine.
-  apk add --no-cache bash curl jq unzip ca-certificates gcompat openrc logrotate tailscale >/dev/null
+  apk add --no-cache bash curl jq ca-certificates gcompat openrc logrotate tailscale >/dev/null
 
   log_info "Enabling tailscaled..."
   rc-update add tailscale default >/dev/null 2>&1 || true
