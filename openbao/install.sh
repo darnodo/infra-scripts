@@ -474,6 +474,54 @@ EOF
 
   configure_tailscale_proxy
 
+  log_info "Configuring MOTD..."
+  # /etc/profile.d/ runs for every interactive login shell — works for both
+  # the auto-login tty and Tailscale SSH. Quoted heredoc: every variable is
+  # resolved at login time, not at install time.
+  cat > /etc/profile.d/00-openbao.sh <<'MOTD'
+TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
+    /"Self"/ { in_self=1 }
+    in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
+')
+[[ -z "$TS_FQDN" ]] && TS_FQDN="$(hostname).ts.net"
+
+BAO_VERSION=$(cat /opt/openbao_version.txt 2>/dev/null || echo "unknown")
+
+# `bao status` exit codes: 0 = unsealed, 2 = sealed, anything else = error.
+VAULT_ADDR=http://127.0.0.1:8200 /usr/local/bin/bao status >/dev/null 2>&1
+case $? in
+    0) SEAL_STATE="unsealed" ;;
+    2) SEAL_STATE="SEALED (run: bao operator unseal)" ;;
+    *) SEAL_STATE="unreachable" ;;
+esac
+
+echo ""
+echo "  ___                   ____             "
+echo " / _ \ _ __   ___ _ __ | __ )  __ _  ___ "
+echo "| | | | '_ \ / _ \ '_ \|  _ \ / _\` |/ _ \\"
+echo "| |_| | |_) |  __/ | | | |_) | (_| | (_) |"
+echo " \___/| .__/ \___|_| |_|____/ \__,_|\___/"
+echo "      |_|                                "
+echo ""
+echo "OpenBao Secrets Manager (${BAO_VERSION})"
+echo "─────────────────────────────────────────"
+echo "Access:"
+echo "  • API (local) : http://127.0.0.1:8200"
+echo "  • Tailnet     : https://${TS_FQDN}"
+echo "  • Seal status : ${SEAL_STATE}"
+echo ""
+echo "Useful commands:"
+echo "  export VAULT_ADDR=http://127.0.0.1:8200"
+echo "  bao status"
+echo "  bao operator init       # first-time only"
+echo "  bao operator unseal     # after every restart"
+echo "  rc-service openbao status"
+echo "  tail -f /var/log/openbao.log"
+echo "─────────────────────────────────────────"
+echo ""
+MOTD
+  chmod +x /etc/profile.d/00-openbao.sh
+
   log_info "Cleaning up..."
   rm -rf /var/cache/apk/*
 

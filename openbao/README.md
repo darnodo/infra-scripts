@@ -39,22 +39,22 @@ the raft data directory.
 
 Every parameter is exposed as an environment variable:
 
-| Variable           | Default       | Description                                                   |
-| ------------------ | ------------- | ------------------------------------------------------------- |
-| `CTID`             | auto          | Container ID (auto-allocated via `pvesh get /cluster/nextid`) |
-| `OPENBAO_HOSTNAME` | `openbao`     | LXC hostname (also used as raft `node_id`)                    |
-| `TEMPLATE`         | auto-detected | Alpine template; auto-detected from `pveam available`         |
-| `STORAGE`          | `local-lvm`   | Proxmox storage for the LXC root disk                         |
-| `TEMPLATE_STORAGE` | `local`       | Storage where Alpine templates live                           |
-| `CORES`            | `2`           | vCPU cores                                                    |
-| `RAM`              | `1024`        | RAM in MiB                                                    |
-| `DISK`             | `8`           | Root disk size in GB                                          |
-| `BRIDGE`           | `vmbr0`       | Network bridge                                                |
-| `LXC_TAG`          | `openbao`     | Stable tag used to re-discover the container                  |
-| `OPENBAO_VERSION`  | `latest`      | Pin a specific release (e.g. `v2.0.3`) or `latest`            |
-| `OPENBAO_LISTEN_ADDR` | `127.0.0.1:8200` | TCP listener address. Loopback by default — Tailscale fronts it. |
-| `OPENBAO_API_ADDR` | `http://<listen>` | Public API URL (used for UI / OIDC redirects). Set to `https://<host>.<tailnet>.ts.net` once known. |
-| `TS_AUTHKEY`       | _(unset)_     | Pre-auth key (generate at <https://login.tailscale.com/admin/settings/keys>). If unset, finish `tailscale up` manually inside the LXC. |
+| Variable              | Default           | Description                                                                                                                            |
+| --------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `CTID`                | auto              | Container ID (auto-allocated via `pvesh get /cluster/nextid`)                                                                          |
+| `OPENBAO_HOSTNAME`    | `openbao`         | LXC hostname (also used as raft `node_id`)                                                                                             |
+| `TEMPLATE`            | auto-detected     | Alpine template; auto-detected from `pveam available`                                                                                  |
+| `STORAGE`             | `local-lvm`       | Proxmox storage for the LXC root disk                                                                                                  |
+| `TEMPLATE_STORAGE`    | `local`           | Storage where Alpine templates live                                                                                                    |
+| `CORES`               | `2`               | vCPU cores                                                                                                                             |
+| `RAM`                 | `1024`            | RAM in MiB                                                                                                                             |
+| `DISK`                | `8`               | Root disk size in GB                                                                                                                   |
+| `BRIDGE`              | `vmbr0`           | Network bridge                                                                                                                         |
+| `LXC_TAG`             | `openbao`         | Stable tag used to re-discover the container                                                                                           |
+| `OPENBAO_VERSION`     | `latest`          | Pin a specific release (e.g. `v2.0.3`) or `latest`                                                                                     |
+| `OPENBAO_LISTEN_ADDR` | `127.0.0.1:8200`  | TCP listener address. Loopback by default — Tailscale fronts it.                                                                       |
+| `OPENBAO_API_ADDR`    | `http://<listen>` | Public API URL (used for UI / OIDC redirects). Set to `https://<host>.<tailnet>.ts.net` once known.                                    |
+| `TS_AUTHKEY`          | _(unset)_         | Pre-auth key (generate at <https://login.tailscale.com/admin/settings/keys>). If unset, finish `tailscale up` manually inside the LXC. |
 
 ```bash
 CTID=210 OPENBAO_HOSTNAME=vault CORES=4 RAM=2048 \
@@ -119,5 +119,5 @@ is kept as `bao.bak.<ts>`), then the service is restarted.
 - **Service**: OpenRC, runs as user `openbao`, logs to `/var/log/openbao.log` (rotated daily, 7 days retained)
 - **Network**: listener bound to `127.0.0.1:8200`; **Tailscale** runs in the LXC and acts as the reverse proxy (`tailscale serve --https=443`)
 - **Config**: `/etc/openbao/config.hcl` — raft storage, TLS disabled on the listener (Tailscale terminates TLS), `disable_mlock = true` for unprivileged LXC
-- **Data**:  `/var/lib/openbao/data` (raft)
+- **Data**: `/var/lib/openbao/data` (raft)
 - **Version tracking**: `/opt/openbao_version.txt` records the currently installed tag for idempotent reruns
