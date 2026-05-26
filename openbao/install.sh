@@ -35,8 +35,11 @@ OPENBAO_API_ADDR="${OPENBAO_API_ADDR:-http://${OPENBAO_LISTEN_ADDR}}"
 # Optional: pre-authorise the LXC's Tailscale non-interactively.
 # Generate at https://login.tailscale.com/admin/settings/keys
 TS_AUTHKEY="${TS_AUTHKEY:-}"
-SCRIPT_URL="https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/openbao/install.sh"
-VERSION_FILE="/opt/openbao_version.txt"
+# SCRIPT_URL is what the host-side flow pipes into the LXC. Override it when
+# testing from a non-main branch, e.g.
+#   SCRIPT_URL="https://gitea.arnodo.fr/.../branch/feat/lxc-OpenBao/openbao/install.sh"
+SCRIPT_URL="${SCRIPT_URL:-https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/openbao/install.sh}"
+VERSION_FILE="${VERSION_FILE:-/opt/openbao_version.txt}"
 BAO_USER="openbao"
 BAO_CONFIG_DIR="/etc/openbao"
 BAO_DATA_DIR="/var/lib/openbao"
@@ -257,6 +260,7 @@ exec_in_lxc() {
   pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq unzip ca-certificates >/dev/null 2>&1"
   curl -fsSL "$SCRIPT_URL" \
     | pct exec "$ctid" --  env \
+        SCRIPT_URL="$SCRIPT_URL" \
         OPENBAO_VERSION="$OPENBAO_VERSION" \
         OPENBAO_HOSTNAME="$HOSTNAME_LXC" \
         OPENBAO_LISTEN_ADDR="$OPENBAO_LISTEN_ADDR" \
