@@ -465,6 +465,13 @@ EOF
   log_info "Starting openbao service..."
   rc-service openbao start || log_warn "openbao failed to start — inspect /var/log/openbao.log"
 
+  log_info "Enabling console auto-login on tty1..."
+  mkdir -p /etc/conf.d
+  cat > /etc/conf.d/agetty <<'EOF'
+agetty_options="--autologin root --noclear"
+EOF
+  sed -i 's|^tty1::respawn:/sbin/getty.*|tty1::respawn:/sbin/agetty --autologin root --noclear 38400 tty1|' /etc/inittab
+
   configure_tailscale_proxy
 
   log_info "Cleaning up..."

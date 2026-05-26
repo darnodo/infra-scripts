@@ -12,6 +12,7 @@ These scripts automate the deployment of personal infrastructure components. The
 - **Multi-OS**: Supports Debian and Alpine-based deployments
 - **Loopback by default**: Services bind to `127.0.0.1`; Tailscale handles the reverse proxy and TLS termination
 - **Log hygiene**: Every long-running service ships with a `logrotate` config (no unbounded log files)
+- **Console auto-login**: Proxmox LXCs are configured for root auto-login on `tty1` (fast `pct enter` and Web UI shell access)
 - **Keep it simple**: One script per service, plain bash, no frameworks — readability over cleverness
 
 ### Available Scripts
