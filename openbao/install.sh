@@ -27,6 +27,14 @@ BRIDGE="${BRIDGE:-vmbr0}"
 LXC_TAG="${LXC_TAG:-openbao}"                     # stable identifier for the container
 OPENBAO_VERSION="${OPENBAO_VERSION:-latest}"      # "latest" or e.g. "v2.0.3"
 OPENBAO_API="https://api.github.com/repos/openbao/openbao/releases"
+OPENBAO_LISTEN_ADDR="${OPENBAO_LISTEN_ADDR:-127.0.0.1:8200}"
+# Public API address advertised to clients (also used for OIDC / UI redirects).
+# Defaults to the local listener; override with the tailnet URL once known,
+# e.g. OPENBAO_API_ADDR="https://openbao.<tailnet>.ts.net".
+OPENBAO_API_ADDR="${OPENBAO_API_ADDR:-http://${OPENBAO_LISTEN_ADDR}}"
+# Optional: pre-authorise the LXC's Tailscale non-interactively.
+# Generate at https://login.tailscale.com/admin/settings/keys
+TS_AUTHKEY="${TS_AUTHKEY:-}"
 SCRIPT_URL="https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/feat/lxc-OpenBao/openbao/install.sh"
 VERSION_FILE="/opt/openbao_version.txt"
 BAO_USER="openbao"
@@ -137,6 +145,53 @@ install_or_upgrade_bao() {
 }
 
 # ============================================================
+# Reusable: bring Tailscale up and publish OpenBao on the tailnet.
+# Idempotent: re-running is a no-op once Tailscale is logged in and the
+# serve mapping is already in place.
+# ============================================================
+configure_tailscale_proxy() {
+  if ! command -v tailscale >/dev/null 2>&1; then
+    log_warn "tailscale CLI not found, skipping reverse-proxy setup."
+    return 0
+  fi
+
+  # 1. Authenticate the node (if it isn't already).
+  local backend_state
+  backend_state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "unknown"')
+  if [[ "$backend_state" != "Running" ]]; then
+    if [[ -n "$TS_AUTHKEY" ]]; then
+      log_info "Bringing Tailscale up with provided auth key..."
+      tailscale up --authkey "$TS_AUTHKEY" --ssh --hostname "$HOSTNAME_LXC" \
+        || log_warn "tailscale up failed — run it manually inside the LXC."
+    else
+      log_warn "Tailscale not authenticated and TS_AUTHKEY was not supplied."
+      log_warn "Finish setup inside the LXC with: tailscale up --ssh"
+      log_warn "Then publish OpenBao with:        tailscale serve --bg --https=443 http://${OPENBAO_LISTEN_ADDR}"
+      return 0
+    fi
+  fi
+
+  # 2. Publish the local OpenBao listener on the tailnet (auto-HTTPS).
+  if tailscale serve status 2>/dev/null | grep -q "${OPENBAO_LISTEN_ADDR}"; then
+    log_info "Tailscale serve already publishes http://${OPENBAO_LISTEN_ADDR}."
+  else
+    log_info "Publishing OpenBao on the tailnet via 'tailscale serve' (HTTPS:443)..."
+    tailscale serve --bg --https=443 "http://${OPENBAO_LISTEN_ADDR}" \
+      || log_warn "tailscale serve failed — enable HTTPS on your tailnet and retry."
+  fi
+
+  local fqdn
+  fqdn=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // ""' | sed 's/\.$//')
+  if [[ -n "$fqdn" ]]; then
+    log_info "OpenBao should now be reachable at: https://${fqdn}"
+    if [[ "$OPENBAO_API_ADDR" != "https://${fqdn}" ]]; then
+      log_warn "OPENBAO_API_ADDR is '${OPENBAO_API_ADDR}'."
+      log_warn "For OIDC / UI redirects, set it to 'https://${fqdn}' and re-run, or edit ${BAO_CONFIG_DIR}/config.hcl."
+    fi
+  fi
+}
+
+# ============================================================
 # Proxmox-host helpers
 # ============================================================
 
@@ -191,13 +246,22 @@ allocate_ctid() {
 }
 
 # Inject the script into the container and execute it in the requested mode.
+# Forwards the relevant runtime configuration through the environment so the
+# inner invocation produces the same config the user requested on the host.
 exec_in_lxc() {
   local ctid="$1"
   local mode="$2"   # --install or --update
 
   # Ensure base tooling exists inside the container before piping the script.
   pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq unzip ca-certificates >/dev/null 2>&1"
-  curl -fsSL "$SCRIPT_URL" | pct exec "$ctid" -- bash -s -- "$mode"
+  curl -fsSL "$SCRIPT_URL" \
+    | pct exec "$ctid" --  env \
+        OPENBAO_VERSION="$OPENBAO_VERSION" \
+        OPENBAO_HOSTNAME="$HOSTNAME_LXC" \
+        OPENBAO_LISTEN_ADDR="$OPENBAO_LISTEN_ADDR" \
+        OPENBAO_API_ADDR="$OPENBAO_API_ADDR" \
+        TS_AUTHKEY="$TS_AUTHKEY" \
+        bash -s -- "$mode"
 }
 
 # ============================================================
@@ -230,6 +294,14 @@ create_lxc() {
     --tags "infra-script,${LXC_TAG}" \
     --onboot 1 \
     --start 0
+
+  # Tailscale needs /dev/net/tun inside the unprivileged container.
+  log_info "Adding /dev/net/tun passthrough for Tailscale..."
+  cat >> "/etc/pve/lxc/${CTID}.conf" <<EOF
+lxc.cgroup2.devices.allow: c 10:200 rwm
+lxc.mount.entry: /dev/net dev/net none bind,create=dir
+lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+EOF
 
   log_info "Starting LXC ${CTID}..."
   pct start "$CTID"
@@ -301,7 +373,11 @@ install_inside_lxc() {
 
   log_info "Installing dependencies..."
   # gcompat: OpenBao binaries are glibc-built; gcompat is required on musl Alpine.
-  apk add --no-cache bash curl jq unzip ca-certificates gcompat openrc logrotate >/dev/null
+  apk add --no-cache bash curl jq unzip ca-certificates gcompat openrc logrotate tailscale >/dev/null
+
+  log_info "Enabling tailscaled..."
+  rc-update add tailscale default >/dev/null 2>&1 || true
+  rc-service tailscale start >/dev/null 2>&1 || log_warn "tailscaled failed to start (is /dev/net/tun mapped into the LXC?)"
 
   install_or_upgrade_bao
 
@@ -318,6 +394,9 @@ install_inside_lxc() {
 
   if [[ ! -f "${BAO_CONFIG_DIR}/config.hcl" ]]; then
     log_info "Writing default ${BAO_CONFIG_DIR}/config.hcl..."
+    # OpenBao listens on loopback only; Tailscale (running in the same LXC)
+    # acts as the reverse proxy and terminates TLS via tailnet certificates.
+    # https://openbao.org/docs/configuration/
     cat > "${BAO_CONFIG_DIR}/config.hcl" <<EOF
 ui            = true
 disable_mlock = true
@@ -328,12 +407,12 @@ storage "raft" {
 }
 
 listener "tcp" {
-  address     = "0.0.0.0:8200"
+  address     = "${OPENBAO_LISTEN_ADDR}"
   tls_disable = 1
 }
 
-api_addr     = "http://0.0.0.0:8200"
-cluster_addr = "http://0.0.0.0:8201"
+api_addr     = "${OPENBAO_API_ADDR}"
+cluster_addr = "http://127.0.0.1:8201"
 EOF
     chown root:"$BAO_USER" "${BAO_CONFIG_DIR}/config.hcl"
     chmod 640 "${BAO_CONFIG_DIR}/config.hcl"
@@ -386,6 +465,8 @@ EOF
   log_info "Starting openbao service..."
   rc-service openbao start || log_warn "openbao failed to start — inspect /var/log/openbao.log"
 
+  configure_tailscale_proxy
+
   log_info "Cleaning up..."
   rm -rf /var/cache/apk/*
 
@@ -409,6 +490,7 @@ update_inside_lxc() {
   apk update >/dev/null
   apk upgrade >/dev/null
   install_or_upgrade_bao
+  configure_tailscale_proxy
   log_info "Update complete."
 }
 

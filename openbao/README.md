@@ -52,6 +52,9 @@ Every parameter is exposed as an environment variable:
 | `BRIDGE`           | `vmbr0`       | Network bridge                                                |
 | `LXC_TAG`          | `openbao`     | Stable tag used to re-discover the container                  |
 | `OPENBAO_VERSION`  | `latest`      | Pin a specific release (e.g. `v2.0.3`) or `latest`            |
+| `OPENBAO_LISTEN_ADDR` | `127.0.0.1:8200` | TCP listener address. Loopback by default — Tailscale fronts it. |
+| `OPENBAO_API_ADDR` | `http://<listen>` | Public API URL (used for UI / OIDC redirects). Set to `https://<host>.<tailnet>.ts.net` once known. |
+| `TS_AUTHKEY`       | _(unset)_     | Pre-auth key (generate at <https://login.tailscale.com/admin/settings/keys>). If unset, finish `tailscale up` manually inside the LXC. |
 
 ```bash
 CTID=210 OPENBAO_HOSTNAME=vault CORES=4 RAM=2048 \
@@ -69,6 +72,36 @@ bao operator init        # save the unseal keys + root token somewhere safe
 bao operator unseal      # repeat with each key share until unsealed
 ```
 
+#### Tailscale reverse proxy
+
+The listener binds to `127.0.0.1:8200` only — Tailscale (running inside the
+same LXC) acts as the reverse proxy and terminates TLS via tailnet
+certificates.
+
+If `TS_AUTHKEY` was supplied at install time, the script runs
+`tailscale up` and `tailscale serve --bg --https=443 http://127.0.0.1:8200`
+automatically. OpenBao then becomes reachable at
+`https://<hostname>.<tailnet>.ts.net`.
+
+Otherwise, finish setup manually inside the LXC:
+
+```bash
+pct enter <CTID>
+tailscale up --ssh
+tailscale serve --bg --https=443 http://127.0.0.1:8200
+tailscale status        # prints the tailnet FQDN
+```
+
+Then point `OPENBAO_API_ADDR` at that FQDN and rerun the script so the UI / OIDC redirects use it:
+
+```bash
+OPENBAO_API_ADDR=https://openbao.<tailnet>.ts.net \
+  bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/feat/lxc-OpenBao/openbao/install.sh)"
+```
+
+> HTTPS in `tailscale serve` requires HTTPS to be enabled on your tailnet
+> (Admin console → DNS → HTTPS Certificates).
+
 #### Update (from inside the LXC)
 
 ```bash
@@ -81,9 +114,10 @@ is kept as `bao.bak.<ts>`), then the service is restarted.
 
 ### Architecture
 
-- **OS**: latest Alpine LXC template (auto-detected), unprivileged, `nesting=1`
+- **OS**: latest Alpine LXC template (auto-detected), unprivileged, `nesting=1`, `/dev/net/tun` passthrough for Tailscale
 - **Binary**: official `bao` release from `github.com/openbao/openbao`, installed in `/usr/local/bin`
 - **Service**: OpenRC, runs as user `openbao`, logs to `/var/log/openbao.log` (rotated daily, 7 days retained)
-- **Config**: `/etc/openbao/config.hcl` — raft storage, TLS disabled (terminate TLS at the reverse proxy), `disable_mlock = true` for unprivileged LXC
-- **Data**: `/var/lib/openbao/data` (raft)
+- **Network**: listener bound to `127.0.0.1:8200`; **Tailscale** runs in the LXC and acts as the reverse proxy (`tailscale serve --https=443`)
+- **Config**: `/etc/openbao/config.hcl` — raft storage, TLS disabled on the listener (Tailscale terminates TLS), `disable_mlock = true` for unprivileged LXC
+- **Data**:  `/var/lib/openbao/data` (raft)
 - **Version tracking**: `/opt/openbao_version.txt` records the currently installed tag for idempotent reruns
