@@ -35,7 +35,7 @@ OPENBAO_API_ADDR="${OPENBAO_API_ADDR:-http://${OPENBAO_LISTEN_ADDR}}"
 # Optional: pre-authorise the LXC's Tailscale non-interactively.
 # Generate at https://login.tailscale.com/admin/settings/keys
 TS_AUTHKEY="${TS_AUTHKEY:-}"
-SCRIPT_URL="https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/feat/lxc-OpenBao/openbao/install.sh"
+SCRIPT_URL="https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/openbao/install.sh"
 VERSION_FILE="/opt/openbao_version.txt"
 BAO_USER="openbao"
 BAO_CONFIG_DIR="/etc/openbao"

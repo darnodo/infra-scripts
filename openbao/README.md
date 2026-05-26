@@ -58,7 +58,7 @@ Every parameter is exposed as an environment variable:
 
 ```bash
 CTID=210 OPENBAO_HOSTNAME=vault CORES=4 RAM=2048 \
-  bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/feat/lxc-OpenBao/openbao/install.sh)"
+  bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/openbao/install.sh)"
 ```
 
 #### First-time initialisation
