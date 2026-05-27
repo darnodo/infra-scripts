@@ -216,12 +216,24 @@ LOGROTATE
 
   ln -sf /usr/sbin/logrotate /etc/periodic/daily/logrotate 2>/dev/null || true
 
-  log_info "Enabling console auto-login..."
-  mkdir -p /etc/conf.d
-  cat <<'EOF' > /etc/conf.d/agetty
-agetty_options="--autologin root --noclear"
-EOF
-  sed -i 's|^tty1::respawn:/sbin/getty.*|tty1::respawn:/sbin/agetty --autologin root --noclear 38400 tty1|' /etc/inittab
+  log_info "Enabling console auto-login on tty1..."
+  # Alpine ships busybox getty by default; agetty (from util-linux) is what
+  # supports --autologin.
+  apk add --no-cache agetty >/dev/null 2>&1 || apk add --no-cache util-linux >/dev/null
+
+  # Replace any existing tty1 entry, then append our autologin line. Doing it
+  # in two steps (delete + append) is more robust than an in-place sed against
+  # a pattern that may drift across Alpine releases.
+  sed -i '/^tty1::/d' /etc/inittab
+  echo 'tty1::respawn:/sbin/agetty --autologin root --noclear 38400 tty1' >> /etc/inittab
+
+  # Tell PID 1 to re-read /etc/inittab so the change takes effect without a reboot.
+  kill -HUP 1 2>/dev/null || true
+
+  # Kick any getty/agetty still attached to tty1 so init respawns it *now* with
+  # the new line — otherwise the first web-console session lands on the stale
+  # process and the operator has to type `exit` once before autologin kicks in.
+  pkill -KILL -f '(getty|agetty).*tty1' 2>/dev/null || true
 
   log_info "Cleaning up..."
   rm -rf /var/cache/apk/*
