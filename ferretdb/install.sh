@@ -47,10 +47,10 @@ DOCUMENTDB_TAG="${DOCUMENTDB_TAG:-latest}"
 DOCUMENTDB_DISTRO="${DOCUMENTDB_DISTRO:-deb12}"
 DOCUMENTDB_RELEASES_URL="${DOCUMENTDB_RELEASES_URL:-https://api.github.com/repos/FerretDB/documentdb/releases}"
 # As a database we deliberately expose the listener on all interfaces so other
-# hosts (LibreChat) can reach it over the LAN / tailnet. PostgreSQL stays local.
+# hosts can reach it over the LAN / tailnet. PostgreSQL stays local.
 FERRETDB_LISTEN_ADDR="${FERRETDB_LISTEN_ADDR:-0.0.0.0:27017}"
 # Application credentials. The same user/password is both the PostgreSQL role
-# FerretDB connects with AND the MongoDB user LibreChat authenticates as.
+# FerretDB connects with AND the MongoDB user clients authenticate as.
 FERRETDB_USER="${FERRETDB_USER:-ferretdb}"
 FERRETDB_PASSWORD="${FERRETDB_PASSWORD:-}"        # auto-generated when empty
 # Optional: pre-authorise the LXC's Tailscale non-interactively.
@@ -389,8 +389,8 @@ EOF
   echo "  IP       : ${ip:-pending}"
   echo "  FerretDB : ${FERRETDB_LISTEN_ADDR}"
   echo ""
-  echo "LibreChat connection string (set as MONGO_URI in LibreChat's .env):"
-  echo "  mongodb://${FERRETDB_USER}:${FERRETDB_PASSWORD}@${ip:-<ip>}:27017/LibreChat"
+  echo "MongoDB connection string (point your client/app at it):"
+  echo "  mongodb://${FERRETDB_USER}:${FERRETDB_PASSWORD}@${ip:-<ip>}:27017/"
   echo ""
   echo "Store this password somewhere safe — it is not persisted on the host:"
   echo "  user     : ${FERRETDB_USER}"
@@ -589,9 +589,9 @@ echo "Status:"
 echo "  • FerretDB   : ${FERRET_STATE} (listening on ${FERRETDB_LISTEN_ADDR})"
 echo "  • PostgreSQL : ${PG_STATE} (127.0.0.1:5432)"
 echo ""
-echo "LibreChat MONGO_URI:"
-echo "  mongodb://${FERRETDB_USER}:<password>@${LAN_IP:-<ip>}:27017/LibreChat"
-echo "  (tailnet) mongodb://${FERRETDB_USER}:<password>@${TS_FQDN}:27017/LibreChat"
+echo "Connection string (MongoDB URI):"
+echo "  mongodb://${FERRETDB_USER}:<password>@${LAN_IP:-<ip>}:27017/"
+echo "  (tailnet) mongodb://${FERRETDB_USER}:<password>@${TS_FQDN}:27017/"
 echo ""
 echo "Useful commands:"
 echo "  systemctl status ferretdb postgresql"
@@ -613,8 +613,8 @@ MOTD
   log_info "FerretDB installation complete!"
   log_info "========================================="
   echo ""
-  echo "Set this as MONGO_URI in LibreChat's .env:"
-  echo "  mongodb://${FERRETDB_USER}:${FERRETDB_PASSWORD}@${ip:-<ip>}:27017/LibreChat"
+  echo "MongoDB connection string (point your client/app at it):"
+  echo "  mongodb://${FERRETDB_USER}:${FERRETDB_PASSWORD}@${ip:-<ip>}:27017/"
   echo ""
   echo "Credentials (store safely — not persisted on the Proxmox host):"
   echo "  user     : ${FERRETDB_USER}"

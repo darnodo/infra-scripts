@@ -3,8 +3,10 @@
 Automated installation and update script for [FerretDB](https://www.ferretdb.io) — a truly
 open-source, MongoDB-compatible database — running inside a **Debian LXC** on Proxmox.
 
-Built to give [LibreChat](https://www.librechat.ai) a drop-in MongoDB replacement without
-running MongoDB itself (whose recent releases break on current kernels).
+A drop-in MongoDB replacement for any app that speaks the MongoDB wire protocol (e.g.
+[LibreChat](https://www.librechat.ai)) without running MongoDB itself. The script installs
+and exposes the database only; wiring it into an application is left to that app's own
+configuration (a separate script, or manually).
 
 ### Why Debian and not Alpine?
 
@@ -72,7 +74,7 @@ Every parameter is exposed as an environment variable:
 | `DOCUMENTDB_TAG`       | `latest`        | DocumentDB release tag (couples documentdb + FerretDB versions); pin e.g. `v0.107.0-ferretdb-2.7.0`                                    |
 | `DOCUMENTDB_DISTRO`    | `deb12`         | Distro target in the documentdb deb filename. Escape hatch for a future `deb13` (set with `TEMPLATE`)                                  |
 | `FERRETDB_LISTEN_ADDR` | `0.0.0.0:27017` | TCP listener. Exposed on all interfaces — it is a database other hosts must reach.                                                     |
-| `FERRETDB_USER`        | `ferretdb`      | App user — both the PostgreSQL role and the MongoDB user LibreChat authenticates as                                                    |
+| `FERRETDB_USER`        | `ferretdb`      | App user — both the PostgreSQL role and the MongoDB user clients authenticate as                                                       |
 | `FERRETDB_PASSWORD`    | auto-generated  | Auto-generated (`openssl rand -hex 24`) when unset; printed in the final summary                                                       |
 | `TS_AUTHKEY`           | _(unset)_       | Pre-auth key (generate at <https://login.tailscale.com/admin/settings/keys>). If unset, finish `tailscale up` manually inside the LXC. |
 
@@ -81,35 +83,23 @@ CTID=220 FERRETDB_HOSTNAME=mongo RAM=4096 DISK=32 \
   bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/ferretdb/install.sh)"
 ```
 
-#### Wiring LibreChat
+#### Connecting a client
 
-LibreChat talks to FerretDB exactly as it would to MongoDB. Point its `MONGO_URI` at the
-container and **remove the bundled `mongodb` service** so it doesn't start:
+Any MongoDB driver or tool connects with a standard connection string (the script prints the
+exact one, with the generated password, at the end of the install):
 
-```env
-# LibreChat .env
-MONGO_URI=mongodb://ferretdb:<password>@<lxc-ip-or-tailnet-fqdn>:27017/LibreChat
+```
+mongodb://ferretdb:<password>@<lxc-ip-or-tailnet-fqdn>:27017/
 ```
 
-If you run LibreChat with the upstream `docker-compose.yml`, drop the dependency on the local
-Mongo service in `docker-compose.override.yml`:
-
-```yaml
-services:
-  api:
-    environment:
-      - MONGO_URI=mongodb://ferretdb:<password>@<lxc-ip>:27017/LibreChat
-  # disable the bundled mongodb service (don't start it)
-  mongodb:
-    profiles: [donotstart]
-```
-
-LibreChat creates the `LibreChat` database on first connection and stores all conversations
-and settings there.
+Append a database name to target one (e.g. `…:27017/myapp`); it is created on first write.
+Wiring this into a specific application (setting its Mongo connection string, disabling any
+bundled MongoDB it ships, etc.) is intentionally out of scope — do it from that app's own
+config or a dedicated script.
 
 #### Tailscale
 
-The LXC joins the tailnet (`tailscale up --ssh`) so LibreChat on another node can reach the
+The LXC joins the tailnet (`tailscale up --ssh`) so a client on another node can reach the
 database over the tailnet. Unlike the `openbao` script there is **no `tailscale serve`** — the
 MongoDB wire protocol is raw TCP, not HTTP, so the listener is exposed directly on
 `0.0.0.0:27017` (LAN + tailnet) by design.
