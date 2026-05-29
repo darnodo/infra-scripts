@@ -215,16 +215,35 @@ configure_tailscale() {
 # Proxmox-host helpers
 # ============================================================
 
-# Detect newest Debian LXC template available from the Proxmox repos.
+# The installer re-fetches itself inside the LXC from SCRIPT_URL. Verify it is
+# reachable on the host *before* creating any container, so a wrong branch/path
+# fails immediately with guidance instead of dying mid-install with a curl 404.
+preflight_script_url() {
+  if curl -fsSL -o /dev/null "$SCRIPT_URL"; then
+    return 0
+  fi
+  log_error "SCRIPT_URL is not reachable: ${SCRIPT_URL}"
+  log_error "The installer re-fetches itself inside the LXC from SCRIPT_URL, so this"
+  log_error "must resolve. If you are testing from a branch (not yet on main), pass it:"
+  log_error "  SCRIPT_URL=https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/<branch>/ferretdb/install.sh \\"
+  log_error "    bash -c \"\$(curl -fsSL \"\$SCRIPT_URL\")\""
+  exit 1
+}
+
+# Detect newest Debian *12* LXC template available from the Proxmox repos.
+# Deliberately pinned to debian-12: the DocumentDB extension only ships a deb12
+# build (DOCUMENTDB_DISTRO default), and a newer template (e.g. debian-13) would
+# pair that deb against a different libicu soname. To move to trixie, set both
+# TEMPLATE and DOCUMENTDB_DISTRO yourself once upstream publishes a deb13 build.
 detect_latest_debian_template() {
   local tmpl
   tmpl=$(pveam available --section system 2>/dev/null \
-    | awk '/^system[[:space:]]+debian-/ {print $2}' \
+    | awk '/^system[[:space:]]+debian-12-/ {print $2}' \
     | sort -V \
     | tail -n1)
 
   if [[ -z "$tmpl" ]]; then
-    log_warn "Could not query pveam; falling back to a known-good Debian template."
+    log_warn "Could not find a debian-12 template via pveam; falling back to a known-good name."
     tmpl="debian-12-standard_12.7-1_amd64.tar.zst"
   fi
   log_info "Selected Debian template: $tmpl"
@@ -607,6 +626,7 @@ main() {
   if command -v pct >/dev/null 2>&1; then
     # Running on a Proxmox host
     require_root
+    preflight_script_url
 
     local existing=""
     if existing=$(find_existing_lxc); then
