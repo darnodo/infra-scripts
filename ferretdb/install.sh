@@ -19,6 +19,13 @@
 
 set -euo pipefail
 
+# Force an always-present locale. A fresh Debian template has not generated the
+# host's locale (e.g. fr_FR.UTF-8 inherited through pct exec), so apt, perl and
+# apt-listchanges warn loudly about it. C.UTF-8 ships with glibc and is always
+# valid; this silences the noise without installing extra locales.
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
 # --- Config (override via environment) ---
 CTID="${CTID:-}"
 HOSTNAME_LXC="${FERRETDB_HOSTNAME:-ferretdb}"
@@ -292,9 +299,11 @@ exec_in_lxc() {
   local mode="$2"   # --install or --update
 
   # Ensure base tooling exists inside the container before piping the script.
-  pct exec "$ctid" -- sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update >/dev/null 2>&1; apt-get install -y bash curl jq ca-certificates >/dev/null 2>&1"
+  pct exec "$ctid" -- sh -c "export DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8 LANG=C.UTF-8; apt-get update >/dev/null 2>&1; apt-get install -y bash curl jq ca-certificates >/dev/null 2>&1"
   curl -fsSL "$SCRIPT_URL" \
     | pct exec "$ctid" --  env \
+        LC_ALL=C.UTF-8 \
+        LANG=C.UTF-8 \
         SCRIPT_URL="$SCRIPT_URL" \
         PG_VERSION="$PG_VERSION" \
         DOCUMENTDB_TAG="$DOCUMENTDB_TAG" \
@@ -403,7 +412,7 @@ update_lxc() {
   fi
 
   log_info "Refreshing Debian packages inside LXC ${ctid}..."
-  pct exec "$ctid" -- sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update >/dev/null && apt-get upgrade -y >/dev/null"
+  pct exec "$ctid" -- sh -c "export DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8 LANG=C.UTF-8; apt-get update >/dev/null && apt-get upgrade -y >/dev/null"
 
   log_info "Upgrading FerretDB stack inside LXC ${ctid}..."
   exec_in_lxc "$ctid" "--update"
