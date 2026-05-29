@@ -467,6 +467,10 @@ documentdb.enableBypassDocumentValidation = true
 documentdb.enableUserCrud = true
 documentdb.maxUserLimit = 100
 
+# Ensure any password we set is hashed with SCRAM-SHA-256 (PG default, set
+# explicitly so it is active before roles are provisioned).
+password_encryption = 'scram-sha-256'
+
 # Postgres stays loopback-only; FerretDB (same LXC) is the network front door.
 listen_addresses = '127.0.0.1'
 EOF
@@ -474,22 +478,36 @@ EOF
   log_info "Restarting PostgreSQL..."
   systemctl restart postgresql
 
-  log_info "Bootstrapping role '${FERRETDB_USER}' and documentdb extension..."
-  # The single homelab app role is a superuser so it can manage collections and
-  # MongoDB users (documentdb.enableUserCrud). FerretDB connects as this role
-  # and LibreChat authenticates as the same user/password.
-  local pw_escaped="${FERRETDB_PASSWORD//\'/\'\'}"
-  su -s /bin/sh postgres -c "psql -v ON_ERROR_STOP=1 -d postgres" >/dev/null <<SQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${FERRETDB_USER}') THEN
-    CREATE ROLE "${FERRETDB_USER}" WITH LOGIN SUPERUSER PASSWORD '${pw_escaped}';
-  ELSE
-    ALTER ROLE "${FERRETDB_USER}" WITH LOGIN SUPERUSER PASSWORD '${pw_escaped}';
-  END IF;
-END
-\$\$;
+  log_info "Creating the documentdb extension..."
+  su -s /bin/sh postgres -c "psql -v ON_ERROR_STOP=1 -d postgres" >/dev/null <<'SQL'
 CREATE EXTENSION IF NOT EXISTS documentdb CASCADE;
+SQL
+
+  # Provision the user THROUGH DocumentDB — never a plain CREATE ROLE ... PASSWORD.
+  # DocumentDB builds the SCRAM-SHA-256 verifier with its own salt length
+  # (documentdb.scramDefaultSaltLen = 28 bytes) via documentdb_api.create_user /
+  # update_user. A native PostgreSQL role instead stores a 16-byte salt, which
+  # MongoDB clients reject at SASL step2 with "invalid salt length of 16".
+  # create_user only accepts a read-only role, or the clusterAdmin +
+  # readWriteAnyDatabase pair we use here for full read/write (FerretDB/DocumentDB
+  # commands/users.c::ValidateAndObtainUserRole). The spec is built with jq so the
+  # password is JSON-escaped, then embedded in a $DDB$-dollar-quoted SQL literal.
+  log_info "Provisioning MongoDB user '${FERRETDB_USER}' via DocumentDB (28-byte SCRAM salt)..."
+  local role_exists cmd spec
+  role_exists=$(su -s /bin/sh postgres -c \
+    "psql -tAX -d postgres -c \"SELECT 1 FROM pg_roles WHERE rolname = '${FERRETDB_USER}'\"" 2>/dev/null || true)
+  if [[ "$role_exists" == "1" ]]; then
+    log_info "Role '${FERRETDB_USER}' already exists — resetting its password via DocumentDB."
+    cmd="update_user"
+    spec=$(jq -nc --arg u "$FERRETDB_USER" --arg p "$FERRETDB_PASSWORD" \
+      '{updateUser:$u, pwd:$p}')
+  else
+    cmd="create_user"
+    spec=$(jq -nc --arg u "$FERRETDB_USER" --arg p "$FERRETDB_PASSWORD" \
+      '{createUser:$u, pwd:$p, roles:[{role:"clusterAdmin",db:"admin"},{role:"readWriteAnyDatabase",db:"admin"}]}')
+  fi
+  su -s /bin/sh postgres -c "psql -v ON_ERROR_STOP=1 -d postgres" >/dev/null <<SQL
+SELECT documentdb_api.${cmd}(\$DDB\$${spec}\$DDB\$);
 SQL
 
   log_info "Writing FerretDB systemd override..."

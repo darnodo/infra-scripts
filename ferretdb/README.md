@@ -142,7 +142,7 @@ PostgreSQL role, and the data are left untouched.
 - **OS**: latest Debian LXC template (auto-detected), unprivileged, `nesting=1`, `/dev/net/tun` passthrough for Tailscale
 - **Storage engine**: PostgreSQL `17` (PGDG) + the DocumentDB extension (`pg_documentdb`, `pg_cron`), loopback-only on `127.0.0.1:5432`
 - **Proxy**: official `ferretdb` deb from `github.com/FerretDB/FerretDB`, systemd unit, listening on `0.0.0.0:27017`
-- **Auth**: MongoDB client credentials map to PostgreSQL roles; the app role is a superuser so the single homelab user can manage collections and Mongo users (`documentdb.enableUserCrud`)
+- **Auth**: the app user is provisioned through `documentdb_api.create_user` (roles `clusterAdmin` + `readWriteAnyDatabase`), **not** a plain `CREATE ROLE`. DocumentDB builds the SCRAM-SHA-256 verifier with its own 28-byte salt (`documentdb.scramDefaultSaltLen`); a native PostgreSQL role would store a 16-byte salt that MongoDB clients reject (`invalid salt length of 16 in sasl step2`). FerretDB connects to PostgreSQL as the same user.
 - **Network**: FerretDB exposed on `0.0.0.0:27017`; Tailscale runs in the LXC for tailnet reachability (no `serve`)
 - **Config**: `/etc/postgresql/17/main/conf.d/documentdb.conf` (extension settings) and `/etc/systemd/system/ferretdb.service.d/override.conf` (`FERRETDB_POSTGRESQL_URL`, `FERRETDB_LISTEN_ADDR`)
 - **Logs**: PostgreSQL via its stock `logrotate`; FerretDB via journald, capped at `SystemMaxUse=200M`
