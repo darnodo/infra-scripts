@@ -35,7 +35,6 @@ check_debian() {
 # Configuration variables (can be overridden via environment)
 HOSTNAME="${NETLAB_HOSTNAME:-netlab}"
 SSH_PORT="${SSH_PORT:-15222}"
-TIMEZONE="${TZ:-Europe/Paris}"
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
 
 main() {
@@ -57,9 +56,9 @@ main() {
 
     log_info "Connecting to Tailscale..."
     if [[ -n "$TAILSCALE_AUTHKEY" ]]; then
-        sudo tailscale up --ssh --advertise-exit-node --auth-key="$TAILSCALE_AUTHKEY"
+        sudo tailscale up --ssh --advertise-routes=172.16.0.0/24 --auth-key="$TAILSCALE_AUTHKEY"
     else
-        sudo tailscale up --ssh --advertise-exit-node
+        sudo tailscale up --ssh --advertise-routes=172.16.0.0/24
     fi
 
     log_info "Configuring sysctl for exit-node and containerlab support..."
@@ -95,7 +94,7 @@ EOF
     sudo ufw --force reset > /dev/null
     sudo ufw default deny incoming > /dev/null
     sudo ufw default allow outgoing > /dev/null
-    sudo ufw allow ${SSH_PORT}/tcp > /dev/null
+    sudo ufw allow "${SSH_PORT}"/tcp > /dev/null
     sudo ufw allow in on tailscale0 > /dev/null
     # Temporarily allow SSH port 22 during setup (safety net)
     sudo ufw allow 22/tcp > /dev/null
