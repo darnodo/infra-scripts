@@ -159,6 +159,15 @@ read_env_var() {
   awk -F= -v k="$key" '$1 == k { sub(/^[^=]*=/, ""); gsub(/^"|"$/, ""); print; exit }' "$env_file"
 }
 
+# Reject the upstream Komodo example placeholders so a compose.env borrowed
+# from komo.do docs is regenerated instead of "preserved" verbatim.
+is_insecure_default() {
+  case "$1" in
+    ""|admin|a_random_secret|a_random_jwt_secret) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 write_compose_files() {
   log_info "Provisioning ${KOMODO_DIR}..."
   mkdir -p "$KOMODO_DIR"
@@ -170,19 +179,19 @@ write_compose_files() {
   webhook_secret="$(read_env_var KOMODO_WEBHOOK_SECRET || true)"
   jwt_secret="$(read_env_var KOMODO_JWT_SECRET || true)"
 
-  if [[ -z "$db_password" ]]; then
+  if is_insecure_default "$db_password"; then
     db_password="$(gen_secret 24)"
     log_info "Generated KOMODO_DATABASE_PASSWORD."
   else
     log_info "Preserving existing KOMODO_DATABASE_PASSWORD from compose.env."
   fi
-  if [[ -z "$webhook_secret" ]]; then
+  if is_insecure_default "$webhook_secret"; then
     webhook_secret="$(gen_secret 32)"
     log_info "Generated KOMODO_WEBHOOK_SECRET."
   else
     log_info "Preserving existing KOMODO_WEBHOOK_SECRET from compose.env."
   fi
-  if [[ -z "$jwt_secret" ]]; then
+  if is_insecure_default "$jwt_secret"; then
     jwt_secret="$(gen_secret 32)"
     log_info "Generated KOMODO_JWT_SECRET."
   else
