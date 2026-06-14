@@ -114,7 +114,7 @@ EOF
   curl -fsSL "$SCRIPT_URL" | pct exec "$CTID" -- bash -s -- --install
 
   local ip
-  local ip\n  ip=$(pct exec \"$CTID\" -- ip -4 addr show eth0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
+  ip=$(pct exec "$CTID" -- ip -4 addr show eth0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
 
   echo ""
   log_info "========================================="
