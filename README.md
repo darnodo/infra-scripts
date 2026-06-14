@@ -24,9 +24,10 @@ These scripts automate the deployment of personal infrastructure components. The
 | [`gitea-runner/install.sh`](gitea-runner/) | Gitea Act Runner on Alpine LXC (Proxmox)              | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh)"` |
 | [`openbao/install.sh`](openbao/)           | OpenBao secrets manager on Alpine LXC (Proxmox)       | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/openbao/install.sh)"`      |
 | [`ferretdb/install.sh`](ferretdb/)         | FerretDB (MongoDB-compatible) on Debian LXC (Proxmox) | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/ferretdb/install.sh)"`     |
+| [`komodo/install.sh`](komodo/)             | Komodo (Docker + MongoDB) on Alpine VM                | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/komodo/install.sh)"`       |
 
 ### Requirements
 
-- Fresh Debian 12/13 installation (proxy, netlab) or Proxmox VE host (gitea-runner, openbao, ferretdb)
-- User with sudo privileges (do not run as root) — except gitea-runner, openbao and ferretdb which run as root on Proxmox
+- Fresh Debian 12/13 installation (proxy, netlab) or Proxmox VE host (gitea-runner, openbao, ferretdb) or Alpine VM (komodo)
+- User with sudo privileges (do not run as root) — except gitea-runner, openbao, ferretdb, and komodo which run as root
 - Internet access
