@@ -337,7 +337,7 @@ bring_up_stack() {
 }
 
 # ============================================================
-# Log hygiene + console auto-login (repo conventions)
+# Log hygiene
 # ============================================================
 configure_log_hygiene() {
   # Bound the journal-equivalent — Alpine uses OpenRC, so we cap Docker's
@@ -357,16 +357,6 @@ EOF
   # containers keep their previous log driver until recreated.
   rc-service docker reload >/dev/null 2>&1 \
     || rc-service docker restart >/dev/null 2>&1 || true
-}
-
-configure_console_autologin() {
-  log_info "Enabling console auto-login on tty1..."
-  # Alpine's busybox getty does not support --autologin; use util-linux's agetty.
-  apk add --no-cache agetty >/dev/null 2>&1 || apk add --no-cache util-linux >/dev/null
-  sed -i '/^tty1::/d' /etc/inittab
-  echo 'tty1::respawn:/sbin/agetty --autologin root --noclear 38400 tty1' >> /etc/inittab
-  kill -HUP 1 2>/dev/null || true
-  pkill -KILL -f '(getty|agetty).*tty1' 2>/dev/null || true
 }
 
 write_motd() {
@@ -436,7 +426,6 @@ main() {
   write_compose_files
   bring_up_stack
   configure_log_hygiene
-  configure_console_autologin
   configure_tailscale_proxy
   write_motd
 
