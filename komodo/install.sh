@@ -374,14 +374,17 @@ write_motd() {
   # install time.
   cat > /etc/profile.d/00-komodo.sh <<'MOTD'
 KOMODO_DIR="${KOMODO_DIR:-/opt/komodo}"
-KOMODO_HOST=$(awk -F= '$1 == "KOMODO_HOST" { print $2; exit }' "${KOMODO_DIR}/compose.env" 2>/dev/null)
-[ -z "$KOMODO_HOST" ] && KOMODO_HOST="https://<not-set>"
 
 TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
     /"Self"/ { in_self=1 }
     in_self && /"DNSName"/ { gsub(/\.$/, "", $4); print $4; exit }
 ')
 [ -z "$TS_FQDN" ] && TS_FQDN="$(hostname).ts.net"
+
+# compose.env is root-only (chmod 600); when this MOTD runs as a non-root user
+# the awk read returns empty, so fall back to the Tailscale-derived FQDN.
+KOMODO_HOST=$(awk -F= '$1 == "KOMODO_HOST" { print $2; exit }' "${KOMODO_DIR}/compose.env" 2>/dev/null)
+[ -z "$KOMODO_HOST" ] && KOMODO_HOST="https://${TS_FQDN}"
 
 CORE_STATE=$(docker inspect -f '{{.State.Status}}' komodo-core-1 2>/dev/null || echo "missing")
 PERI_STATE=$(docker inspect -f '{{.State.Status}}' komodo-periphery-1 2>/dev/null || echo "missing")
