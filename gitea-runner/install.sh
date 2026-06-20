@@ -17,6 +17,7 @@ RAM="${RAM:-2048}"
 DISK="${DISK:-8}"
 BRIDGE="${BRIDGE:-vmbr0}"
 SCRIPT_URL="https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh"
+GITEA_HOSTNAME="${GITEA_HOSTNAME:-gitea.taila5ad8.ts.net}"
 GITEA_API="https://gitea.com/api/v1/repos/gitea/act_runner/releases"
 VERSION_FILE="/opt/gitea-runner_version.txt"
 
@@ -198,11 +199,11 @@ start_pre() {
 
     local timeout=30
     local elapsed=0
-    ebegin "Waiting for Tailscale MagicDNS to resolve gitea.taila5ad8.ts.net"
-    while ! getent hosts gitea.taila5ad8.ts.net > /dev/null 2>&1; do
+    ebegin "Waiting for Tailscale MagicDNS to resolve __GITEA_HOSTNAME__"
+    while ! getent hosts "__GITEA_HOSTNAME__" > /dev/null 2>&1; do
         if [ "$elapsed" -ge "$timeout" ]; then
             eend 1
-            eerror "Timed out after ${timeout}s waiting for MagicDNS resolution of gitea.taila5ad8.ts.net"
+            eerror "Timed out after ${timeout}s waiting for MagicDNS resolution of __GITEA_HOSTNAME__"
             return 1
         fi
         sleep 1
@@ -211,6 +212,7 @@ start_pre() {
     eend 0
 }
 EOF
+  sed -i "s/__GITEA_HOSTNAME__/${GITEA_HOSTNAME}/g" /etc/init.d/gitea-runner
   chmod +x /etc/init.d/gitea-runner
   rc-update add gitea-runner default > /dev/null
 
