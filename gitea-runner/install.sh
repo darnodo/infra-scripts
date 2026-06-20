@@ -195,6 +195,20 @@ start_pre() {
     export PATH="/usr/local/bin:$PATH"
     checkpath --directory --owner gitea-runner:docker --mode 0755 /var/lib/gitea-runner
     checkpath --file --owner gitea-runner:docker --mode 0644 /var/log/gitea-runner.log
+
+    local timeout=30
+    local elapsed=0
+    ebegin "Waiting for Tailscale MagicDNS to resolve gitea.taila5ad8.ts.net"
+    while ! getent hosts gitea.taila5ad8.ts.net > /dev/null 2>&1; do
+        if [ "$elapsed" -ge "$timeout" ]; then
+            eend 1
+            eerror "Timed out after ${timeout}s waiting for MagicDNS resolution of gitea.taila5ad8.ts.net"
+            return 1
+        fi
+        sleep 1
+        elapsed=$(( elapsed + 1 ))
+    done
+    eend 0
 }
 EOF
   chmod +x /etc/init.d/gitea-runner
