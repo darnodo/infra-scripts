@@ -73,10 +73,20 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 # download the bao binary, so this adds no new failure mode.
 # ============================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd || true)"
+LIB_COMMON_URL="$(dirname "$(dirname "$SCRIPT_URL")")/lib/common.sh"
 if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../lib/common.sh" ]]; then
   source "${SCRIPT_DIR}/../lib/common.sh"
 else
-  source <(curl -fsSL "$(dirname "$(dirname "$SCRIPT_URL")")/lib/common.sh")
+  source <(curl -fsSL "$LIB_COMMON_URL")
+fi
+
+# `source <(curl ...)` swallows curl failures: an empty stream still makes
+# `source` return 0, so a 404/network error would otherwise only surface
+# later as a confusing "command not found" for detect_latest_alpine_template
+# et al. Fail loudly here instead, with the URL that was tried.
+if ! declare -F detect_latest_alpine_template >/dev/null; then
+  log_error "Failed to load lib/common.sh (tried: ${LIB_COMMON_URL})."
+  exit 1
 fi
 
 # ============================================================
