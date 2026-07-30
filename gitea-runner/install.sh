@@ -8,14 +8,15 @@ set -euo pipefail
 
 # --- Config (override via environment) ---
 CTID="${CTID:-}"
-HOSTNAME="${RUNNER_HOSTNAME:-gitea-runner}"
-TEMPLATE="${TEMPLATE:-alpine-3.23-default_20260116_amd64.tar.xz}"
+HOSTNAME_LXC="${RUNNER_HOSTNAME:-gitea-runner}"
+TEMPLATE="${TEMPLATE:-}"                          # auto-detected when empty
 STORAGE="${STORAGE:-local-lvm}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 CORES="${CORES:-2}"
 RAM="${RAM:-2048}"
 DISK="${DISK:-8}"
 BRIDGE="${BRIDGE:-vmbr0}"
+LXC_TAG="${LXC_TAG:-gitea-runner}"                # stable identifier for the container
 SCRIPT_URL="https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh"
 GITEA_HOSTNAME="${GITEA_HOSTNAME:-gitea.taila5ad8.ts.net}"
 GITEA_API="https://gitea.com/api/v1/repos/gitea/act_runner/releases"
@@ -30,6 +31,25 @@ NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# ============================================================
+# Load shared helpers (lib/common.sh: detect_latest_alpine_template,
+# enable_tty1_autologin, find_existing_lxc, refresh_os_packages).
+#
+# Same reasoning as openbao/install.sh: a local checkout has the file
+# on disk right next to us, but the documented curl one-liner (host or
+# piped into `pct exec` inside the LXC) has no BASH_SOURCE path worth
+# trusting, so fall back to fetching lib/common.sh over HTTP next to
+# SCRIPT_URL. The LXC already needs outbound network to curl this very
+# script and to download the act_runner binary, so this adds no new
+# failure mode.
+# ============================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd || true)"
+if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../lib/common.sh" ]]; then
+  source "${SCRIPT_DIR}/../lib/common.sh"
+else
+  source <(curl -fsSL "$(dirname "$(dirname "$SCRIPT_URL")")/lib/common.sh")
+fi
 
 # --- Helpers ---
 get_latest_release() {
@@ -73,6 +93,12 @@ download_runner() {
 create_lxc() {
   log_info "=== Gitea Act Runner — LXC Creation ==="
 
+  if [[ -z "$TEMPLATE" ]]; then
+    TEMPLATE=$(detect_latest_alpine_template)
+  else
+    log_info "Using user-provided template: $TEMPLATE"
+  fi
+
   # Auto-select next CTID if not specified
   if [[ -z "$CTID" ]]; then
     CTID=$(pvesh get /cluster/resources --type vm --output-format json 2>/dev/null \
@@ -86,9 +112,9 @@ create_lxc() {
     pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
   fi
 
-  log_info "Creating LXC $CTID ($HOSTNAME)..."
+  log_info "Creating LXC $CTID ($HOSTNAME_LXC)..."
   pct create "$CTID" "${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}" \
-    --hostname "$HOSTNAME" \
+    --hostname "$HOSTNAME_LXC" \
     --cores "$CORES" \
     --memory "$RAM" \
     --rootfs "${STORAGE}:${DISK}" \
@@ -122,7 +148,7 @@ EOF
   log_info "LXC $CTID created successfully!"
   log_info "========================================="
   echo ""
-  echo "  Hostname : $HOSTNAME"
+  echo "  Hostname : $HOSTNAME_LXC"
   echo "  IP       : ${ip:-pending}"
   echo ""
   echo "Next steps:"
@@ -232,24 +258,7 @@ LOGROTATE
 
   ln -sf /usr/sbin/logrotate /etc/periodic/daily/logrotate 2>/dev/null || true
 
-  log_info "Enabling console auto-login on tty1..."
-  # Alpine ships busybox getty by default; agetty (from util-linux) is what
-  # supports --autologin.
-  apk add --no-cache agetty >/dev/null 2>&1 || apk add --no-cache util-linux >/dev/null
-
-  # Replace any existing tty1 entry, then append our autologin line. Doing it
-  # in two steps (delete + append) is more robust than an in-place sed against
-  # a pattern that may drift across Alpine releases.
-  sed -i '/^tty1::/d' /etc/inittab
-  echo 'tty1::respawn:/sbin/agetty --autologin root --noclear 38400 tty1' >> /etc/inittab
-
-  # Tell PID 1 to re-read /etc/inittab so the change takes effect without a reboot.
-  kill -HUP 1 2>/dev/null || true
-
-  # Kick any getty/agetty still attached to tty1 so init respawns it *now* with
-  # the new line — otherwise the first web-console session lands on the stale
-  # process and the operator has to type `exit` once before autologin kicks in.
-  pkill -KILL -f '(getty|agetty).*tty1' 2>/dev/null || true
+  enable_tty1_autologin
 
   log_info "Cleaning up..."
   rm -rf /var/cache/apk/*

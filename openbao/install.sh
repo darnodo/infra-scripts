@@ -57,6 +57,29 @@ log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 # ============================================================
+# Load shared helpers (lib/common.sh: detect_latest_alpine_template,
+# enable_tty1_autologin, find_existing_lxc, refresh_os_packages).
+#
+# This script runs in three different contexts, only one of which has a
+# real file on disk next to it:
+#   - local checkout (`bash openbao/install.sh`)         -> lib/common.sh
+#     sits right there at ../lib/common.sh, source it straight from disk.
+#   - Proxmox host, documented one-liner (`bash -c "$(curl ... )"`)
+#     -> no checkout, no BASH_SOURCE path worth trusting.
+#   - inside the LXC (exec_in_lxc does `curl ... | pct exec ... bash -s --`)
+#     -> same story, script arrives on stdin.
+# For the latter two we fetch lib/common.sh over HTTP, next to SCRIPT_URL.
+# The LXC already needs outbound network to curl this very script and to
+# download the bao binary, so this adds no new failure mode.
+# ============================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd || true)"
+if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../lib/common.sh" ]]; then
+  source "${SCRIPT_DIR}/../lib/common.sh"
+else
+  source <(curl -fsSL "$(dirname "$(dirname "$SCRIPT_URL")")/lib/common.sh")
+fi
+
+# ============================================================
 # Generic helpers
 # ============================================================
 require_root() {
@@ -204,37 +227,6 @@ configure_tailscale_proxy() {
 # Proxmox-host helpers
 # ============================================================
 
-# Detect newest Alpine LXC template available from the Proxmox repos.
-detect_latest_alpine_template() {
-  local tmpl
-  tmpl=$(pveam available --section system 2>/dev/null \
-    | awk '/^system[[:space:]]+alpine-/ {print $2}' \
-    | sort -V \
-    | tail -n1)
-
-  if [[ -z "$tmpl" ]]; then
-    log_warn "Could not query pveam; falling back to a known-good Alpine template."
-    tmpl="alpine-3.22-default_20250617_amd64.tar.xz"
-  fi
-  log_info "Selected Alpine template: $tmpl"
-  echo "$tmpl"
-}
-
-# Find an existing LXC by tag or hostname. Echoes CTID, returns 1 if none.
-find_existing_lxc() {
-  local id host tags
-  while read -r id _; do
-    [[ -z "$id" || "$id" == "VMID" ]] && continue
-    host=$(pct config "$id" 2>/dev/null | awk -F': ' '/^hostname:/ {print $2}' || true)
-    tags=$(pct config "$id" 2>/dev/null | awk -F': ' '/^tags:/ {print $2}' || true)
-    if [[ "$host" == "$HOSTNAME_LXC" ]] || [[ ",${tags//;/,}," == *",${LXC_TAG},"* ]]; then
-      echo "$id"
-      return 0
-    fi
-  done < <(pct list | awk 'NR>1 {print $1}')
-  return 1
-}
-
 ensure_template_present() {
   local tmpl="$1"
   if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$tmpl"; then
@@ -363,6 +355,9 @@ update_lxc() {
   fi
 
   log_info "Refreshing Alpine packages inside LXC ${ctid}..."
+  # refresh_os_packages() is a bash function local to this process; it can't
+  # run over `pct exec ... sh -c` without shipping the function definition
+  # into the container, so this call site stays inline rather than dedupe.
   pct exec "$ctid" -- sh -c "apk update >/dev/null && apk upgrade >/dev/null"
 
   log_info "Upgrading bao binary inside LXC ${ctid}..."
@@ -474,24 +469,7 @@ EOF
   log_info "Starting openbao service..."
   rc-service openbao start || log_warn "openbao failed to start — inspect /var/log/openbao.log"
 
-  log_info "Enabling console auto-login on tty1..."
-  # Alpine ships busybox getty by default; agetty (from util-linux) is what
-  # supports --autologin.
-  apk add --no-cache agetty >/dev/null 2>&1 || apk add --no-cache util-linux >/dev/null
-
-  # Replace any existing tty1 entry, then append our autologin line. Doing it
-  # in two steps (delete + append) is more robust than an in-place sed against
-  # a pattern that may drift across Alpine releases.
-  sed -i '/^tty1::/d' /etc/inittab
-  echo 'tty1::respawn:/sbin/agetty --autologin root --noclear 38400 tty1' >> /etc/inittab
-
-  # Tell PID 1 to re-read /etc/inittab so the change takes effect without a reboot.
-  kill -HUP 1 2>/dev/null || true
-
-  # Kick any getty/agetty still attached to tty1 so init respawns it *now* with
-  # the new line — otherwise the first web-console session lands on the stale
-  # process and the operator has to type `exit` once before autologin kicks in.
-  pkill -KILL -f '(getty|agetty).*tty1' 2>/dev/null || true
+  enable_tty1_autologin
 
   configure_tailscale_proxy
 
@@ -563,8 +541,7 @@ MOTD
 # ============================================================
 update_inside_lxc() {
   log_info "=== OpenBao — update ==="
-  apk update >/dev/null
-  apk upgrade >/dev/null
+  refresh_os_packages
   install_or_upgrade_bao
   configure_tailscale_proxy
   log_info "Update complete."
