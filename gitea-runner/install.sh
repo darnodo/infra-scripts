@@ -17,7 +17,10 @@ RAM="${RAM:-2048}"
 DISK="${DISK:-8}"
 BRIDGE="${BRIDGE:-vmbr0}"
 LXC_TAG="${LXC_TAG:-gitea-runner}"                # stable identifier for the container
-SCRIPT_URL="https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh"
+# SCRIPT_URL is what the host-side flow pipes into the LXC. Override it when
+# testing from a non-main branch, e.g.
+#   SCRIPT_URL="https://gitea.arnodo.fr/.../branch/chore/standardize-lxc-scripts/gitea-runner/install.sh"
+SCRIPT_URL="${SCRIPT_URL:-https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh}"
 GITEA_HOSTNAME="${GITEA_HOSTNAME:-gitea.taila5ad8.ts.net}"
 GITEA_API="https://gitea.com/api/v1/repos/gitea/act_runner/releases"
 VERSION_FILE="/opt/gitea-runner_version.txt"
