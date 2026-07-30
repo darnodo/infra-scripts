@@ -110,7 +110,9 @@ curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/feat/lxc-Open
 
 The script auto-detects the presence of `/usr/local/bin/bao` and switches to
 update mode. The OpenRC service is stopped, the binary is swapped (the old one
-is kept as `bao.bak.<ts>`), then the service is restarted.
+is kept as `bao.bak.<ts>`), then the service is restarted. Re-running from the
+Proxmox host does the same, plus refreshes the LXC's Alpine packages first
+(`apk update && apk upgrade`).
 
 ### Architecture
 

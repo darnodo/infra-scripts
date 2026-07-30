@@ -20,7 +20,7 @@ Single script, three automatic modes:
 bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh)"
 ```
 
-The script automatically creates an Alpine 3.23 LXC with Docker and act_runner.
+The script automatically creates an Alpine LXC (template auto-detected from `pveam available`) with Docker and act_runner.
 
 #### Customization
 
@@ -34,6 +34,7 @@ CTID=120 HOSTNAME=runner-02 CORES=4 RAM=4096 bash -c "$(curl -fsSL https://gitea
 |----------|---------|-------------|
 | `CTID` | auto | Container ID |
 | `RUNNER_HOSTNAME` | `gitea-runner` | LXC Hostname |
+| `TEMPLATE` | auto-detected | Alpine template; auto-detected from `pveam available` |
 | `CORES` | `2` | CPU cores |
 | `RAM` | `2048` | RAM in MiB |
 | `DISK` | `8` | Disk in GB |
@@ -59,7 +60,7 @@ From inside the LXC:
 curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh | bash
 ```
 
-The script detects that act_runner is already installed and switches to update mode automatically.
+The script detects that act_runner is already installed and switches to update mode automatically. Re-running from the Proxmox host does the same, plus refreshes the LXC's Alpine packages first (`apk update && apk upgrade`).
 
 ### Architecture
 

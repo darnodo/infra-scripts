@@ -8,15 +8,19 @@ set -euo pipefail
 
 # --- Config (override via environment) ---
 CTID="${CTID:-}"
-HOSTNAME="${RUNNER_HOSTNAME:-gitea-runner}"
-TEMPLATE="${TEMPLATE:-alpine-3.23-default_20260116_amd64.tar.xz}"
+HOSTNAME_LXC="${RUNNER_HOSTNAME:-gitea-runner}"
+TEMPLATE="${TEMPLATE:-}"                          # auto-detected when empty
 STORAGE="${STORAGE:-local-lvm}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 CORES="${CORES:-2}"
 RAM="${RAM:-2048}"
 DISK="${DISK:-8}"
 BRIDGE="${BRIDGE:-vmbr0}"
-SCRIPT_URL="https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh"
+LXC_TAG="${LXC_TAG:-gitea-runner}"                # stable identifier for the container
+# SCRIPT_URL is what the host-side flow pipes into the LXC. Override it when
+# testing from a non-main branch, e.g.
+#   SCRIPT_URL="https://gitea.arnodo.fr/.../branch/chore/standardize-lxc-scripts/gitea-runner/install.sh"
+SCRIPT_URL="${SCRIPT_URL:-https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh}"
 GITEA_HOSTNAME="${GITEA_HOSTNAME:-gitea.taila5ad8.ts.net}"
 GITEA_API="https://gitea.com/api/v1/repos/gitea/act_runner/releases"
 VERSION_FILE="/opt/gitea-runner_version.txt"
@@ -27,9 +31,47 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+# Logs go to stderr so callers can safely use $(fn) without capturing log noise.
+log_info()  { echo -e "${GREEN}[INFO]${NC} $1" >&2; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+require_root() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    log_error "This script must be run as root (current uid: $(id -u))."
+    log_error "On Proxmox, launch it from the host shell or via the Web UI shell, both of which run as root."
+    exit 1
+  fi
+}
+
+# ============================================================
+# Load shared helpers (lib/common.sh: detect_latest_alpine_template,
+# enable_tty1_autologin, find_existing_lxc, refresh_os_packages).
+#
+# Same reasoning as openbao/install.sh: a local checkout has the file
+# on disk right next to us, but the documented curl one-liner (host or
+# piped into `pct exec` inside the LXC) has no BASH_SOURCE path worth
+# trusting, so fall back to fetching lib/common.sh over HTTP next to
+# SCRIPT_URL. The LXC already needs outbound network to curl this very
+# script and to download the act_runner binary, so this adds no new
+# failure mode.
+# ============================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd || true)"
+LIB_COMMON_URL="$(dirname "$(dirname "$SCRIPT_URL")")/lib/common.sh"
+if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../lib/common.sh" ]]; then
+  source "${SCRIPT_DIR}/../lib/common.sh"
+else
+  source <(curl -fsSL "$LIB_COMMON_URL")
+fi
+
+# `source <(curl ...)` swallows curl failures: an empty stream still makes
+# `source` return 0, so a 404/network error would otherwise only surface
+# later as a confusing "command not found" for detect_latest_alpine_template
+# et al. Fail loudly here instead, with the URL that was tried.
+if ! declare -F detect_latest_alpine_template >/dev/null; then
+  log_error "Failed to load lib/common.sh (tried: ${LIB_COMMON_URL})."
+  exit 1
+fi
 
 # --- Helpers ---
 get_latest_release() {
@@ -67,11 +109,33 @@ download_runner() {
   echo "$release" > "$VERSION_FILE"
 }
 
+# Inject the script into the container and execute it in the requested mode.
+# Forwards the runtime configuration the inner invocation needs to reproduce
+# what the user requested on the host (mirrors openbao/install.sh's helper
+# of the same name).
+exec_in_lxc() {
+  local ctid="$1"
+  local mode="$2"   # --install or --update
+
+  pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq ca-certificates > /dev/null 2>&1"
+  curl -fsSL "$SCRIPT_URL" \
+    | pct exec "$ctid" -- env \
+        SCRIPT_URL="$SCRIPT_URL" \
+        GITEA_HOSTNAME="$GITEA_HOSTNAME" \
+        bash -s -- "$mode"
+}
+
 # ============================================================
 # MODE 1: Proxmox host — create LXC container
 # ============================================================
 create_lxc() {
   log_info "=== Gitea Act Runner — LXC Creation ==="
+
+  if [[ -z "$TEMPLATE" ]]; then
+    TEMPLATE=$(detect_latest_alpine_template)
+  else
+    log_info "Using user-provided template: $TEMPLATE"
+  fi
 
   # Auto-select next CTID if not specified
   if [[ -z "$CTID" ]]; then
@@ -80,22 +144,18 @@ create_lxc() {
     log_info "Auto-selected CTID: $CTID"
   fi
 
-  # Download template if needed
-  if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE"; then
-    log_info "Downloading template $TEMPLATE..."
-    pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
-  fi
+  ensure_template_present "$TEMPLATE"
 
-  log_info "Creating LXC $CTID ($HOSTNAME)..."
+  log_info "Creating LXC $CTID ($HOSTNAME_LXC)..."
   pct create "$CTID" "${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}" \
-    --hostname "$HOSTNAME" \
+    --hostname "$HOSTNAME_LXC" \
     --cores "$CORES" \
     --memory "$RAM" \
     --rootfs "${STORAGE}:${DISK}" \
     --net0 "name=eth0,bridge=${BRIDGE},ip=dhcp" \
     --unprivileged 1 \
     --features nesting=1,keyctl=1 \
-    --tags "infra-script,cicd" \
+    --tags "infra-script,${LXC_TAG}" \
     --start 0
 
   log_info "Configuring LXC for Docker and Tailscale..."
@@ -111,8 +171,7 @@ EOF
   sleep 5
 
   log_info "Injecting install script into container..."
-  pct exec "$CTID" -- sh -c "apk add --no-cache bash curl jq > /dev/null 2>&1"
-  curl -fsSL "$SCRIPT_URL" | pct exec "$CTID" -- bash -s -- --install
+  exec_in_lxc "$CTID" "--install"
 
   local ip
   ip=$(pct exec "$CTID" -- ip -4 addr show eth0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
@@ -122,7 +181,7 @@ EOF
   log_info "LXC $CTID created successfully!"
   log_info "========================================="
   echo ""
-  echo "  Hostname : $HOSTNAME"
+  echo "  Hostname : $HOSTNAME_LXC"
   echo "  IP       : ${ip:-pending}"
   echo ""
   echo "Next steps:"
@@ -131,6 +190,28 @@ EOF
   echo "  su -s /bin/bash gitea-runner -c 'act_runner register'"
   echo "  rc-service gitea-runner start"
   echo ""
+}
+
+# ============================================================
+# MODE 1b: Proxmox host — update an existing LXC
+# ============================================================
+update_lxc() {
+  local ctid="$1"
+  log_info "=== Gitea Act Runner — updating existing LXC ${ctid} ==="
+
+  if ! pct status "$ctid" | grep -q running; then
+    log_info "Starting LXC ${ctid}..."
+    pct start "$ctid"
+    sleep 3
+  fi
+
+  log_info "Refreshing Alpine packages inside LXC ${ctid}..."
+  pct exec "$ctid" -- sh -c "apk update >/dev/null && apk upgrade >/dev/null"
+
+  log_info "Upgrading act_runner binary inside LXC ${ctid}..."
+  exec_in_lxc "$ctid" "--update"
+
+  log_info "Update of LXC ${ctid} complete."
 }
 
 # ============================================================
@@ -232,24 +313,7 @@ LOGROTATE
 
   ln -sf /usr/sbin/logrotate /etc/periodic/daily/logrotate 2>/dev/null || true
 
-  log_info "Enabling console auto-login on tty1..."
-  # Alpine ships busybox getty by default; agetty (from util-linux) is what
-  # supports --autologin.
-  apk add --no-cache agetty >/dev/null 2>&1 || apk add --no-cache util-linux >/dev/null
-
-  # Replace any existing tty1 entry, then append our autologin line. Doing it
-  # in two steps (delete + append) is more robust than an in-place sed against
-  # a pattern that may drift across Alpine releases.
-  sed -i '/^tty1::/d' /etc/inittab
-  echo 'tty1::respawn:/sbin/agetty --autologin root --noclear 38400 tty1' >> /etc/inittab
-
-  # Tell PID 1 to re-read /etc/inittab so the change takes effect without a reboot.
-  kill -HUP 1 2>/dev/null || true
-
-  # Kick any getty/agetty still attached to tty1 so init respawns it *now* with
-  # the new line — otherwise the first web-console session lands on the stale
-  # process and the operator has to type `exit` once before autologin kicks in.
-  pkill -KILL -f '(getty|agetty).*tty1' 2>/dev/null || true
+  enable_tty1_autologin
 
   log_info "Cleaning up..."
   rm -rf /var/cache/apk/*
@@ -274,6 +338,8 @@ LOGROTATE
 # ============================================================
 update_runner() {
   log_info "=== Gitea Act Runner — Update ==="
+
+  refresh_os_packages
 
   local release
   release=$(get_latest_release)
@@ -305,18 +371,37 @@ update_runner() {
 # Main — detect context
 # ============================================================
 main() {
-  if [[ "${1:-}" == "--install" ]]; then
-    # Explicitly called in install mode (from pct exec)
-    install_runner
-  elif command -v pct &> /dev/null; then
+  case "${1:-}" in
+    --install)
+      install_runner
+      return
+      ;;
+    --update)
+      update_runner
+      return
+      ;;
+  esac
+
+  if command -v pct &> /dev/null; then
     # We're on the Proxmox host
-    create_lxc
-  elif [[ -f /usr/local/bin/act_runner ]]; then
-    # act_runner exists — update mode
-    update_runner
+    require_root
+    local existing=""
+    if existing=$(find_existing_lxc); then
+      log_info "Found existing gitea-runner LXC (CTID ${existing}, hostname/tag match) — switching to update mode."
+      update_lxc "$existing"
+    else
+      create_lxc
+    fi
   else
-    # Fresh LXC — install mode
-    install_runner
+    # Inside a container (no Proxmox tooling)
+    require_root
+    if [[ -f /usr/local/bin/act_runner ]]; then
+      # act_runner exists — update mode
+      update_runner
+    else
+      # Fresh LXC — install mode
+      install_runner
+    fi
   fi
 }
 
