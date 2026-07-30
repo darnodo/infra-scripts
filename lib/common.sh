@@ -17,8 +17,10 @@
 #     config`. Reusable as-is by any LXC creator script.
 #   - refresh_os_packages(): Alpine only (apk update && apk upgrade). A
 #     future Debian-based script needs its own apt-get variant.
-
-set -euo pipefail
+#
+# Does not set shell options (set -e/-u/-o pipefail): a sourced file must
+# not impose those on the caller's shell. Both openbao/install.sh and
+# gitea-runner/install.sh already set them before sourcing this file.
 
 # ============================================================
 # #12 - Detect newest Alpine LXC template available from the Proxmox repos.
@@ -66,6 +68,23 @@ enable_tty1_autologin() {
 }
 
 # ============================================================
+# #12 - Ensure the given template is downloaded to TEMPLATE_STORAGE, doing a
+# `pveam update` first so a stale local cache doesn't silently settle for an
+# older version than the one detect_latest_alpine_template() just picked.
+# Expects TEMPLATE_STORAGE to be set by the caller.
+# ============================================================
+ensure_template_present() {
+  local tmpl="$1"
+  if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$tmpl"; then
+    log_info "Downloading template ${tmpl} to storage ${TEMPLATE_STORAGE}..."
+    pveam update >/dev/null
+    pveam download "$TEMPLATE_STORAGE" "$tmpl"
+  else
+    log_info "Template ${tmpl} already present on ${TEMPLATE_STORAGE}."
+  fi
+}
+
+# ============================================================
 # #15 - Find an existing LXC by tag or hostname (host-side, requires pct).
 # Echoes the CTID on match, returns 1 if none found.
 #
@@ -88,7 +107,12 @@ find_existing_lxc() {
 
 # ============================================================
 # #15 - Refresh OS packages (Alpine: apk update && apk upgrade).
-# Callable both host-side (via pct exec) and inside the LXC.
+# Callable only from inside the LXC: this is a plain bash function in the
+# current process, so it cannot run across a `pct exec ... sh -c` boundary
+# without shipping its definition into the container. Host-side callers
+# (see openbao/install.sh's update_lxc()) invoke apk update/upgrade inline
+# via `pct exec` instead — do not try to dedupe that call site onto this
+# function.
 # ============================================================
 refresh_os_packages() {
   log_info "Refreshing Alpine packages..."
