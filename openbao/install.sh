@@ -237,17 +237,6 @@ configure_tailscale_proxy() {
 # Proxmox-host helpers
 # ============================================================
 
-ensure_template_present() {
-  local tmpl="$1"
-  if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$tmpl"; then
-    log_info "Downloading template ${tmpl} to storage ${TEMPLATE_STORAGE}..."
-    pveam update >/dev/null
-    pveam download "$TEMPLATE_STORAGE" "$tmpl"
-  else
-    log_info "Template ${tmpl} already present on ${TEMPLATE_STORAGE}."
-  fi
-}
-
 # Pick next available CTID if user did not provide one.
 allocate_ctid() {
   pvesh get /cluster/nextid 2>/dev/null \

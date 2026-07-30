@@ -117,7 +117,7 @@ exec_in_lxc() {
   local ctid="$1"
   local mode="$2"   # --install or --update
 
-  pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq > /dev/null 2>&1"
+  pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq ca-certificates > /dev/null 2>&1"
   curl -fsSL "$SCRIPT_URL" \
     | pct exec "$ctid" -- env \
         SCRIPT_URL="$SCRIPT_URL" \
@@ -144,11 +144,7 @@ create_lxc() {
     log_info "Auto-selected CTID: $CTID"
   fi
 
-  # Download template if needed
-  if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE"; then
-    log_info "Downloading template $TEMPLATE..."
-    pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
-  fi
+  ensure_template_present "$TEMPLATE"
 
   log_info "Creating LXC $CTID ($HOSTNAME_LXC)..."
   pct create "$CTID" "${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}" \
@@ -396,12 +392,16 @@ main() {
     else
       create_lxc
     fi
-  elif [[ -f /usr/local/bin/act_runner ]]; then
-    # act_runner exists — update mode
-    update_runner
   else
-    # Fresh LXC — install mode
-    install_runner
+    # Inside a container (no Proxmox tooling)
+    require_root
+    if [[ -f /usr/local/bin/act_runner ]]; then
+      # act_runner exists — update mode
+      update_runner
+    else
+      # Fresh LXC — install mode
+      install_runner
+    fi
   fi
 }
 
