@@ -32,6 +32,14 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+require_root() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    log_error "This script must be run as root (current uid: $(id -u))."
+    log_error "On Proxmox, launch it from the host shell or via the Web UI shell, both of which run as root."
+    exit 1
+  fi
+}
+
 # ============================================================
 # Load shared helpers (lib/common.sh: detect_latest_alpine_template,
 # enable_tty1_autologin, find_existing_lxc, refresh_os_packages).
@@ -87,6 +95,22 @@ download_runner() {
   echo "$release" > "$VERSION_FILE"
 }
 
+# Inject the script into the container and execute it in the requested mode.
+# Forwards the runtime configuration the inner invocation needs to reproduce
+# what the user requested on the host (mirrors openbao/install.sh's helper
+# of the same name).
+exec_in_lxc() {
+  local ctid="$1"
+  local mode="$2"   # --install or --update
+
+  pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq > /dev/null 2>&1"
+  curl -fsSL "$SCRIPT_URL" \
+    | pct exec "$ctid" -- env \
+        SCRIPT_URL="$SCRIPT_URL" \
+        GITEA_HOSTNAME="$GITEA_HOSTNAME" \
+        bash -s -- "$mode"
+}
+
 # ============================================================
 # MODE 1: Proxmox host — create LXC container
 # ============================================================
@@ -121,7 +145,7 @@ create_lxc() {
     --net0 "name=eth0,bridge=${BRIDGE},ip=dhcp" \
     --unprivileged 1 \
     --features nesting=1,keyctl=1 \
-    --tags "infra-script,cicd" \
+    --tags "infra-script,${LXC_TAG}" \
     --start 0
 
   log_info "Configuring LXC for Docker and Tailscale..."
@@ -137,8 +161,7 @@ EOF
   sleep 5
 
   log_info "Injecting install script into container..."
-  pct exec "$CTID" -- sh -c "apk add --no-cache bash curl jq > /dev/null 2>&1"
-  curl -fsSL "$SCRIPT_URL" | pct exec "$CTID" -- bash -s -- --install
+  exec_in_lxc "$CTID" "--install"
 
   local ip
   ip=$(pct exec "$CTID" -- ip -4 addr show eth0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
@@ -157,6 +180,28 @@ EOF
   echo "  su -s /bin/bash gitea-runner -c 'act_runner register'"
   echo "  rc-service gitea-runner start"
   echo ""
+}
+
+# ============================================================
+# MODE 1b: Proxmox host — update an existing LXC
+# ============================================================
+update_lxc() {
+  local ctid="$1"
+  log_info "=== Gitea Act Runner — updating existing LXC ${ctid} ==="
+
+  if ! pct status "$ctid" | grep -q running; then
+    log_info "Starting LXC ${ctid}..."
+    pct start "$ctid"
+    sleep 3
+  fi
+
+  log_info "Refreshing Alpine packages inside LXC ${ctid}..."
+  pct exec "$ctid" -- sh -c "apk update >/dev/null && apk upgrade >/dev/null"
+
+  log_info "Upgrading act_runner binary inside LXC ${ctid}..."
+  exec_in_lxc "$ctid" "--update"
+
+  log_info "Update of LXC ${ctid} complete."
 }
 
 # ============================================================
@@ -284,6 +329,8 @@ LOGROTATE
 update_runner() {
   log_info "=== Gitea Act Runner — Update ==="
 
+  refresh_os_packages
+
   local release
   release=$(get_latest_release)
 
@@ -314,12 +361,27 @@ update_runner() {
 # Main — detect context
 # ============================================================
 main() {
-  if [[ "${1:-}" == "--install" ]]; then
-    # Explicitly called in install mode (from pct exec)
-    install_runner
-  elif command -v pct &> /dev/null; then
+  case "${1:-}" in
+    --install)
+      install_runner
+      return
+      ;;
+    --update)
+      update_runner
+      return
+      ;;
+  esac
+
+  if command -v pct &> /dev/null; then
     # We're on the Proxmox host
-    create_lxc
+    require_root
+    local existing=""
+    if existing=$(find_existing_lxc); then
+      log_info "Found existing gitea-runner LXC (CTID ${existing}, hostname/tag match) — switching to update mode."
+      update_lxc "$existing"
+    else
+      create_lxc
+    fi
   elif [[ -f /usr/local/bin/act_runner ]]; then
     # act_runner exists — update mode
     update_runner

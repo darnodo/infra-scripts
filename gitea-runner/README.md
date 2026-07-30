@@ -60,7 +60,7 @@ From inside the LXC:
 curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh | bash
 ```
 
-The script detects that act_runner is already installed and switches to update mode automatically.
+The script detects that act_runner is already installed and switches to update mode automatically. Re-running from the Proxmox host does the same, plus refreshes the LXC's Alpine packages first (`apk update && apk upgrade`).
 
 ### Architecture
 
