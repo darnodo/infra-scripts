@@ -61,6 +61,7 @@ LIB_COMMON_URL="$(dirname "$(dirname "$SCRIPT_URL")")/lib/common.sh"
 if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../lib/common.sh" ]]; then
   source "${SCRIPT_DIR}/../lib/common.sh"
 else
+  # shellcheck source=/dev/null
   source <(curl -fsSL "$LIB_COMMON_URL")
 fi
 
