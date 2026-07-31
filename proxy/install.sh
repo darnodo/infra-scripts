@@ -44,6 +44,13 @@ ACME_EMAIL="${ACME_EMAIL:-}"
 # Generate at https://login.tailscale.com/admin/settings/keys
 TS_AUTHKEY="${TS_AUTHKEY:-}"
 
+# rsyslog receiver for exposed services' logs (see "Configuring rsyslog" below).
+RSYSLOG_PORT="${RSYSLOG_PORT:-5514}"
+# Default 0.0.0.0 is fine: UFW's default-deny only opens 80/443 publicly, so
+# this port is reachable exclusively over tailscale0 either way. Override to
+# a specific tailnet IP to shrink the blast radius of log injection instead.
+RSYSLOG_BIND_ADDR="${RSYSLOG_BIND_ADDR:-0.0.0.0}"
+
 main() {
     log_info "=== Proxy Server Deployment (Traefik v3) ==="
 
@@ -75,7 +82,7 @@ main() {
 
     log_info "Installing base packages..."
     sudo apt update -qq
-    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades ufw ethtool networkd-dispatcher > /dev/null
+    sudo apt install -y -qq vim ca-certificates curl gnupg lsb-release fail2ban unattended-upgrades ufw ethtool networkd-dispatcher rsyslog > /dev/null
 
     log_info "Installing Tailscale..."
     curl -fsSL https://tailscale.com/install.sh | sh
@@ -173,6 +180,40 @@ action   = iptables-multiport[name=traefik, port="80,443", protocol=tcp]
 EOF
 
     sudo systemctl restart fail2ban
+
+    log_info "Configuring rsyslog receiver for exposed services..."
+    # A fail2ban jail running inside a service's own LXC only ever sees this
+    # proxy's tailnet IP as the source of connections, so it would end up
+    # banning the proxy itself. Detection has to stay where the signal is
+    # (the service's application log); banning has to happen here, at the
+    # edge where public connections actually terminate. Services forward
+    # their logs to this receiver over TCP; adding a new one is a matter of
+    # dropping a 50-<service>.conf here (see proxy/README.md) — nothing else
+    # to touch.
+    sudo mkdir -p /var/log/remote
+    sudo tee /etc/rsyslog.d/10-remote-receiver.conf > /dev/null << EOF
+module(load="imtcp")
+
+\$RuleSet remoteLogs
+\$template RemoteLogPath,"/var/log/remote/%HOSTNAME%.log"
+*.* ?RemoteLogPath
+\$RuleSet RSYSLOG_DefaultRuleset
+
+input(type="imtcp" port="${RSYSLOG_PORT}" address="${RSYSLOG_BIND_ADDR}" ruleset="remoteLogs")
+EOF
+
+    sudo tee /etc/logrotate.d/remote-logs > /dev/null << 'EOF'
+/var/log/remote/*.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+
+    sudo systemctl restart rsyslog
 
     log_info "Creating Traefik stack under $TRAEFIK_DIR..."
     mkdir -p "$TRAEFIK_DIR/conf.d"
