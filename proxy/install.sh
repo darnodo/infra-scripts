@@ -158,7 +158,11 @@ main() {
 # Two patterns cover both possible field orderings in the JSON.
 failregex = ^.*"ClientHost":"<HOST>".*"DownstreamStatus":(401|403|429|5[0-9]{2})
             ^.*"DownstreamStatus":(401|403|429|5[0-9]{2}).*"ClientHost":"<HOST>"
-ignoreregex =
+# Git smart-HTTP always does an unauthenticated request first, gets a 401
+# WWW-Authenticate challenge, then retries with credentials. That first 401
+# is protocol, not abuse — without this exclusion a handful of git
+# clone/fetch/push in a few minutes bans the client on a private repo.
+ignoreregex = ^.*"RequestPath":"[^"]*/(info/refs|git-upload-pack|git-receive-pack)[^"]*".*"DownstreamStatus":401
 EOF
 
     sudo tee /etc/fail2ban/jail.d/traefik.conf > /dev/null << 'EOF'
