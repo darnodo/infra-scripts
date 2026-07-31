@@ -151,6 +151,14 @@ ini_set() {
 
   tmp=$(mktemp "${file}.tmp.XXXXXX")
 
+  # mktemp defaults to 0600 root:root, which would silently lock the
+  # service account that owns $file (e.g. gitea:www-data on Gitea's
+  # app.ini) out of the config this function just wrote. Carry the
+  # original file's mode/ownership onto the replacement before it lands.
+  # `stat -c` works identically on GNU coreutils and BusyBox.
+  chmod "$(stat -c '%a' "$file")" "$tmp" 2>/dev/null || true
+  chown "$(stat -c '%u:%g' "$file")" "$tmp" 2>/dev/null || true
+
   awk -v section="$section" -v key="$key" -v value="$value" '
     /^\[.*\]$/ {
       if (in_section && !done) {
