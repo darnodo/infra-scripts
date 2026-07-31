@@ -17,6 +17,9 @@
 #     config`. Reusable as-is by any LXC creator script.
 #   - refresh_os_packages(): Alpine only (apk update && apk upgrade). A
 #     future Debian-based script needs its own apt-get variant.
+#   - ini_set(): OS-agnostic (plain awk/sed, no OS-specific assumptions).
+#     Reusable as-is by any script that manages an INI-style config file,
+#     regardless of the underlying distro.
 #
 # Does not set shell options (set -e/-u/-o pipefail): a sourced file must
 # not impose those on the caller's shell. Both openbao/install.sh and
@@ -117,4 +120,70 @@ find_existing_lxc() {
 refresh_os_packages() {
   log_info "Refreshing Alpine packages..."
   apk update >/dev/null && apk upgrade >/dev/null
+}
+
+# ============================================================
+# #18 - Idempotently set KEY = VALUE in SECTION of an INI-style config file
+# (e.g. Gitea's app.ini). Merges key by key rather than overwriting the
+# whole file, so a rejoué script can add newly-required keys to an already
+# customized config without clobbering it.
+#
+# Usage: ini_set <file> <section> <key> <value>
+#
+# Behavior:
+#   - Missing file/section/key: created.
+#   - Key present with a different value: replaced in place.
+#   - Key present with the same value: no-op (byte-identical output).
+#   - Other sections/keys: never touched — the match is scoped to the
+#     given section, so the same key name in a different section (e.g.
+#     ENABLED in both [metrics] and [actions]) is left alone.
+# Comments, blank lines and section order are preserved. Written atomically
+# (tmpfile + mv) so an interrupted run can't leave a corrupt config.
+# ============================================================
+ini_set() {
+  local file="$1" section="$2" key="$3" value="$4"
+  local tmp
+
+  if [[ ! -f "$file" ]]; then
+    mkdir -p "$(dirname "$file")"
+    : > "$file"
+  fi
+
+  tmp=$(mktemp "${file}.tmp.XXXXXX")
+
+  awk -v section="$section" -v key="$key" -v value="$value" '
+    /^\[.*\]$/ {
+      if (in_section && !done) {
+        printf "%s = %s\n", key, value
+        done = 1
+      }
+      cur = $0
+      gsub(/^\[|\]$/, "", cur)
+      in_section = (cur == section)
+      if (in_section) section_found = 1
+      print
+      next
+    }
+    {
+      if (in_section && !done && match($0, "^[ \t]*" key "[ \t]*=")) {
+        printf "%s = %s\n", key, value
+        done = 1
+        next
+      }
+      print
+    }
+    END {
+      if (in_section && !done) {
+        printf "%s = %s\n", key, value
+        done = 1
+      }
+      if (!section_found) {
+        if (NR > 0) print ""
+        printf "[%s]\n", section
+        printf "%s = %s\n", key, value
+      }
+    }
+  ' "$file" > "$tmp"
+
+  mv "$tmp" "$file"
 }
