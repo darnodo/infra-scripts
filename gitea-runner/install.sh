@@ -21,9 +21,18 @@ LXC_TAG="${LXC_TAG:-gitea-runner}"                # stable identifier for the co
 # testing from a non-main branch, e.g.
 #   SCRIPT_URL="https://gitea.arnodo.fr/.../branch/chore/standardize-lxc-scripts/gitea-runner/install.sh"
 SCRIPT_URL="${SCRIPT_URL:-https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh}"
+# Bare hostname: consumed by the OpenRC start_pre()'s `getent hosts` MagicDNS
+# wait. Do not append a scheme/port to this one — see GITEA_INSTANCE_URL.
 GITEA_HOSTNAME="${GITEA_HOSTNAME:-gitea.taila5ad8.ts.net}"
+# Full URL used at registration time (`act_runner register`) and shown in the
+# post-install instructions. Since Gitea (#19) moved to `tailscale serve
+# --https=443`, the instance is reachable on 443 with no port in the URL —
+# derived from GITEA_HOSTNAME by default, but kept separate so either can be
+# overridden independently.
+GITEA_INSTANCE_URL="${GITEA_INSTANCE_URL:-https://${GITEA_HOSTNAME}}"
 GITEA_API="https://gitea.com/api/v1/repos/gitea/act_runner/releases"
 VERSION_FILE="/opt/gitea-runner_version.txt"
+RUNNER_CONFIG_FILE="/var/lib/gitea-runner/.runner"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -110,6 +119,27 @@ download_runner() {
   echo "$release" > "$VERSION_FILE"
 }
 
+# ============================================================
+# The instance URL is baked into .runner at registration time; changing
+# GITEA_INSTANCE_URL afterwards doesn't retroactively fix an already
+# registered runner. Detect the drift and tell the operator how to fix it
+# rather than silently destroying a working .runner — deleting it is a
+# manual, deliberate action documented in the README, not something this
+# rerunnable script should do on its own.
+# ============================================================
+check_runner_url_drift() {
+  [[ -f "$RUNNER_CONFIG_FILE" ]] || return 0
+
+  local registered_url
+  registered_url=$(jq -r '.address // empty' "$RUNNER_CONFIG_FILE" 2>/dev/null || true)
+
+  if [[ -n "$registered_url" && "$registered_url" != "$GITEA_INSTANCE_URL" ]]; then
+    log_warn "Runner is registered against '${registered_url}', but GITEA_INSTANCE_URL is '${GITEA_INSTANCE_URL}'."
+    log_warn "The registered URL is frozen in ${RUNNER_CONFIG_FILE} — this script will not touch it automatically."
+    log_warn "To re-register against the current URL, see 'Re-registration' in gitea-runner/README.md."
+  fi
+}
+
 # Inject the script into the container and execute it in the requested mode.
 # Forwards the runtime configuration the inner invocation needs to reproduce
 # what the user requested on the host (mirrors openbao/install.sh's helper
@@ -123,6 +153,7 @@ exec_in_lxc() {
     | pct exec "$ctid" -- env \
         SCRIPT_URL="$SCRIPT_URL" \
         GITEA_HOSTNAME="$GITEA_HOSTNAME" \
+        GITEA_INSTANCE_URL="$GITEA_INSTANCE_URL" \
         bash -s -- "$mode"
 }
 
@@ -188,7 +219,7 @@ EOF
   echo "Next steps:"
   echo "  pct enter $CTID"
   echo "  cd /var/lib/gitea-runner"
-  echo "  su -s /bin/bash gitea-runner -c 'act_runner register'"
+  echo "  su -s /bin/bash gitea-runner -c 'act_runner register --instance ${GITEA_INSTANCE_URL}'"
   echo "  rc-service gitea-runner start"
   echo ""
 }
@@ -329,7 +360,7 @@ LOGROTATE
   echo ""
   echo "Register the runner:"
   echo "  cd /var/lib/gitea-runner"
-  echo "  su -s /bin/bash gitea-runner -c 'act_runner register'"
+  echo "  su -s /bin/bash gitea-runner -c 'act_runner register --instance ${GITEA_INSTANCE_URL}'"
   echo "  rc-service gitea-runner start"
   echo ""
 }
@@ -339,6 +370,8 @@ LOGROTATE
 # ============================================================
 update_runner() {
   log_info "=== Gitea Act Runner — Update ==="
+
+  check_runner_url_drift
 
   refresh_os_packages
 

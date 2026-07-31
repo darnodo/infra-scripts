@@ -40,6 +40,8 @@ CTID=120 HOSTNAME=runner-02 CORES=4 RAM=4096 bash -c "$(curl -fsSL https://gitea
 | `DISK` | `8` | Disk in GB |
 | `STORAGE` | `local-lvm` | Proxmox storage for the LXC |
 | `BRIDGE` | `vmbr0` | Network bridge |
+| `GITEA_HOSTNAME` | `gitea.taila5ad8.ts.net` | Bare tailnet hostname of the Gitea instance, resolved via MagicDNS at service start |
+| `GITEA_INSTANCE_URL` | `https://<GITEA_HOSTNAME>` | Full URL used to register the runner. Derived from `GITEA_HOSTNAME` by default but overridable independently — e.g. if Gitea is ever exposed on a different scheme/port than the tailnet default |
 
 #### Runner registration
 
@@ -48,9 +50,36 @@ After installation, enter the LXC and register the runner:
 ```bash
 pct enter <CTID>
 cd /var/lib/gitea-runner
-su -s /bin/bash gitea-runner -c "act_runner register"
+su -s /bin/bash gitea-runner -c "act_runner register --instance https://gitea.taila5ad8.ts.net"
 rc-service gitea-runner start
 ```
+
+Use the value of `GITEA_INSTANCE_URL` (printed at the end of installation) as
+`--instance`. As of Gitea's move to `tailscale serve --https=443` (#19), the
+instance is reachable on 443 with **no port** in the URL — do not register
+against the old `:3000` address.
+
+#### Re-registration
+
+The instance URL is frozen into `/var/lib/gitea-runner/.runner` at
+registration time. Changing `GITEA_INSTANCE_URL` and re-running this script
+does **not** retroactively fix an already-registered runner — the script
+detects the mismatch and prints a warning, but never deletes or rewrites
+`.runner` on its own (that would silently break a working runner on a
+routine rerun).
+
+To point an existing runner at a new instance URL:
+
+```bash
+rc-service gitea-runner stop
+rm /var/lib/gitea-runner/.runner
+cd /var/lib/gitea-runner
+su -s /bin/bash gitea-runner -c "act_runner register --instance <new-url>"
+rc-service gitea-runner start
+```
+
+A fresh registration token from the Gitea UI (Site Administration → Actions →
+Runners) is required each time — tokens are single-use.
 
 #### Update
 
