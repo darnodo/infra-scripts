@@ -190,16 +190,36 @@ EOF
     # their logs to this receiver over TCP; adding a new one is a matter of
     # dropping a 50-<service>.conf here (see proxy/README.md) — nothing else
     # to touch.
+    #
+    # 10- carries only the listener (module/input): rsyslog loads
+    # /etc/rsyslog.d/*.conf in filename order, and rules within a ruleset
+    # execute in the order they were loaded. A catch-all defined here would
+    # run *before* any 50-<service>.conf's rules ever get a chance — every
+    # message would double up into both the generic file and the
+    # service-specific one. The catch-all instead lives in
+    # 90-remote-fallback.conf (below, written after this block) so it loads
+    # last, and a service's `stop` actually prevents fallthrough into it.
     sudo mkdir -p /var/log/remote
     sudo tee /etc/rsyslog.d/10-remote-receiver.conf > /dev/null << EOF
 module(load="imtcp")
 
-\$RuleSet remoteLogs
-\$template RemoteLogPath,"/var/log/remote/%HOSTNAME%.log"
-*.* ?RemoteLogPath
-\$RuleSet RSYSLOG_DefaultRuleset
-
 input(type="imtcp" port="${RSYSLOG_PORT}" address="${RSYSLOG_BIND_ADDR}" ruleset="remoteLogs")
+EOF
+
+    # Catch-all for anything a 50-<service>.conf doesn't claim (or before one
+    # exists yet). Kept on the legacy $RuleSet/$template directives rather
+    # than the modern ruleset(name=...){...} object: rsyslog rejects a named
+    # ruleset declared via that object syntax more than once ("ruleset ...
+    # specified more than once"), which would break the moment a
+    # 50-<service>.conf tries to add its own rules to the same "remoteLogs"
+    # ruleset — the entire point of this split. $RuleSet <name> is a context
+    # selector, not a one-shot declaration, so any number of files can
+    # reopen it to append rules.
+    sudo tee /etc/rsyslog.d/90-remote-fallback.conf > /dev/null << 'EOF'
+$RuleSet remoteLogs
+$template RemoteLogPath,"/var/log/remote/%HOSTNAME%.log"
+*.* ?RemoteLogPath
+$RuleSet RSYSLOG_DefaultRuleset
 EOF
 
     sudo tee /etc/logrotate.d/remote-logs > /dev/null << 'EOF'

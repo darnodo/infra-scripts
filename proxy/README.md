@@ -72,22 +72,40 @@ logs to this proxy over TCP so a jail here can act on them.
 
 | File | Purpose |
 |------|---------|
-| `/etc/rsyslog.d/10-remote-receiver.conf` | Generic `imtcp` listener, port `RSYSLOG_PORT` (default `5514`). Anything not claimed by a more specific routing file lands in `/var/log/remote/<sender-hostname>.log`. |
-| `/etc/rsyslog.d/50-<service>.conf` | One per exposed service. Routes by tag/programname into that service's own logfile for its dedicated fail2ban jail. |
+| `/etc/rsyslog.d/10-remote-receiver.conf` | Generic `imtcp` listener only (`module`/`input`), port `RSYSLOG_PORT` (default `5514`). No rules here — see why below. |
+| `/etc/rsyslog.d/50-<service>.conf` | One per exposed service. Routes by tag/programname into that service's own logfile for its dedicated fail2ban jail, then `stop`s so the message doesn't also fall through to the catch-all. |
+| `/etc/rsyslog.d/90-remote-fallback.conf` | Catch-all: anything a `50-<service>.conf` didn't claim (or before one exists yet) lands in `/var/log/remote/<sender-hostname>.log`. |
 | `/etc/logrotate.d/remote-logs` | Rotation for everything under `/var/log/remote/` (`copytruncate`, so fail2ban never loses its file descriptor across a rotation). |
+
+rsyslog loads `/etc/rsyslog.d/*.conf` in filename order, and rules within a
+ruleset run in the order they were loaded — a catch-all in `10-` would fire
+on *every* message before a `50-<service>.conf` ever got a look, doubling
+every claimed message into both files. Keeping the listener in `10-`, routing
+in `50-`, and the catch-all in `90-` puts them in the right order without
+depending on load-order accidents.
 
 Adding a new exposed service is a matter of dropping its `50-<service>.conf`
 here — nothing else in this list needs to change. A minimal example that
-routes messages tagged `myservice` into their own file, in addition to the
+routes messages tagged `myservice` into their own file instead of the
 generic catch-all:
 
 ```
 $RuleSet remoteLogs
 if $programname == 'myservice' then {
     action(type="omfile" file="/var/log/myservice/myservice.log")
+    stop
 }
 $RuleSet RSYSLOG_DefaultRuleset
 ```
+
+Deliberately on the legacy `$RuleSet <name>` directive rather than the
+modern `ruleset(name="...") { ... }` object syntax: rsyslog rejects a named
+ruleset declared with that object syntax more than once ("ruleset ...
+specified more than once"), which breaks the moment a second
+`50-<service>.conf` (or `90-remote-fallback.conf`) tries to add its own
+rules to the same `remoteLogs` ruleset. `$RuleSet <name>` is a context
+selector, not a one-shot declaration — any number of files can reopen it to
+append rules, which is the entire point of this pattern.
 
 `RSYSLOG_PORT` and `RSYSLOG_BIND_ADDR` (default `0.0.0.0`) are overridable
 via environment. The default bind is safe as-is: UFW's default-deny only
