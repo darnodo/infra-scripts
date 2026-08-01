@@ -159,12 +159,27 @@ ini_set() {
   chmod "$(stat -c '%a' "$file")" "$tmp" 2>/dev/null || true
   chown "$(stat -c '%u:%g' "$file")" "$tmp" 2>/dev/null || true
 
-  awk -v section="$section" -v key="$key" -v value="$value" '
+  # awk writes into $tmp regardless of its own exit status — a mid-stream
+  # death (OOM, signal, an exotic value tripping the regex) would still
+  # leave a truncated-but-nonempty $tmp for `mv` to install over $file.
+  # Gate the mv on awk's exit code so a failure leaves the original config
+  # untouched instead of silently destroying it.
+  if ! awk -v section="$section" -v key="$key" -v value="$value" '
+    # Blank lines are buffered rather than printed immediately while a
+    # section is still awaiting insertion: without this, a key inserted
+    # right before the next section header lands *after* that section'"'"'s
+    # trailing blank line(s) instead of before them. Flushed as soon as
+    # either a non-blank line or the insertion itself happens, so this
+    # never reorders anything except relative to that pending insertion.
+    function flush_blanks() {
+      while (blank_count > 0) { print ""; blank_count-- }
+    }
     /^\[.*\]$/ {
       if (in_section && !done) {
         printf "%s = %s\n", key, value
         done = 1
       }
+      flush_blanks()
       cur = $0
       gsub(/^\[|\]$/, "", cur)
       in_section = (cur == section)
@@ -173,9 +188,19 @@ ini_set() {
       next
     }
     {
-      if (in_section && !done && match($0, "^[ \t]*" key "[ \t]*=")) {
-        printf "%s = %s\n", key, value
-        done = 1
+      if (in_section && !done) {
+        if (match($0, "^[ \t]*" key "[ \t]*=")) {
+          flush_blanks()
+          printf "%s = %s\n", key, value
+          done = 1
+          next
+        }
+        if ($0 ~ /^[ \t]*$/) {
+          blank_count++
+          next
+        }
+        flush_blanks()
+        print
         next
       }
       print
@@ -185,13 +210,18 @@ ini_set() {
         printf "%s = %s\n", key, value
         done = 1
       }
+      flush_blanks()
       if (!section_found) {
         if (NR > 0) print ""
         printf "[%s]\n", section
         printf "%s = %s\n", key, value
       }
     }
-  ' "$file" > "$tmp"
+  ' "$file" > "$tmp"; then
+    rm -f "$tmp"
+    log_error "ini_set: awk failed on ${file} (${section}.${key}), config left untouched."
+    return 1
+  fi
 
   mv "$tmp" "$file"
 }
