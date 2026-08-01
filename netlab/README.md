@@ -5,7 +5,7 @@ Deploys a network lab server with ContainerLab for network simulation and testin
 ## Quick Start
 
 ```bash
-curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/netlab/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/netlab/install.sh | bash
 ```
 
 ## Components
@@ -27,7 +27,7 @@ curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/netlab/i
 Example:
 
 ```bash
-NETLAB_HOSTNAME=clab01 SSH_PORT=22222 curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/netlab/install.sh | bash
+NETLAB_HOSTNAME=clab01 SSH_PORT=22222 curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/netlab/install.sh | bash
 ```
 
 ## Network Access

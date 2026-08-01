@@ -32,7 +32,7 @@ script can just run `apk add docker` and let dockerd own the kernel namespace.
 #### Install / update
 
 ```bash
-bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/komodo/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/komodo/install.sh)"
 ```
 
 The script prints the generated `KOMODO_DATABASE_PASSWORD`, `KOMODO_WEBHOOK_SECRET`, and
