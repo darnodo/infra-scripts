@@ -289,6 +289,24 @@ EOF
 
   rc-update add rsyslog default >/dev/null 2>&1 || true
   rc-service rsyslog status >/dev/null 2>&1 && rc-service rsyslog stop
+
+  # SYSLOG_TARGET is a MagicDNS name; omfwd resolves it once at rsyslog
+  # startup, so starting before Tailscale has come up and propagated the
+  # name would leave the forwarder silently broken until the next restart.
+  # Same bounded-wait pattern as gitea-runner/install.sh's start_pre().
+  # configure_tailscale_proxy() must already have run by the time we get
+  # here — do not reorder that.
+  local tries=0
+  until getent hosts "$SYSLOG_TARGET" >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    if (( tries > 30 )); then
+      log_warn "Could not resolve ${SYSLOG_TARGET} after 30s — starting rsyslog anyway."
+      log_warn "Forwarding will stay broken until the name resolves and rsyslog is restarted (rerun this script)."
+      break
+    fi
+    sleep 1
+  done
+
   rc-service rsyslog start
 }
 
@@ -477,7 +495,7 @@ install_inside_lxc() {
   check_gitea_channel
 
   log_info "Installing dependencies..."
-  apk add --no-cache bash curl jq ca-certificates openssl gcompat openrc tailscale >/dev/null
+  apk add --no-cache bash curl jq ca-certificates openssl openrc tailscale >/dev/null
 
   log_info "Installing gitea + gitea-openrc..."
   apk add --no-cache gitea gitea-openrc >/dev/null
@@ -496,6 +514,10 @@ install_inside_lxc() {
   wait_for_gitea_ready
   create_admin_user
 
+  configure_tailscale_proxy
+
+  # SYSLOG_TARGET is a MagicDNS name — must run after configure_tailscale_proxy
+  # so the tailnet (and MagicDNS) is actually up by the time rsyslog starts.
   configure_rsyslog_forwarder
 
   log_info "Configuring logrotate for ${GITEA_LOG_DIR}/gitea.log..."
@@ -514,8 +536,6 @@ EOF
 
   enable_tty1_autologin
 
-  configure_tailscale_proxy
-
   log_info "Configuring MOTD..."
   # /etc/profile.d/ runs for every interactive login shell — works for both
   # the auto-login tty and Tailscale SSH. Quoted heredoc: every variable is
@@ -528,7 +548,7 @@ TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
 ')
 [[ -z "$TS_FQDN" ]] && TS_FQDN="$(hostname).ts.net"
 
-GITEA_VERSION=$(apk list -I 2>/dev/null | awk '/^gitea-[0-9]/{print $1; exit}' | sed 's/^gitea-//')
+GITEA_VERSION=$(apk info -e -v gitea 2>/dev/null | sed 's/^gitea-//')
 [[ -z "$GITEA_VERSION" ]] && GITEA_VERSION="unknown"
 
 if rc-service gitea status >/dev/null 2>&1; then
@@ -593,10 +613,12 @@ update_inside_lxc() {
   rc-service gitea start
   wait_for_gitea_ready
 
-  configure_rsyslog_forwarder
   configure_tailscale_proxy
+  # SYSLOG_TARGET is a MagicDNS name — must run after configure_tailscale_proxy
+  # so the tailnet (and MagicDNS) is actually up by the time rsyslog starts.
+  configure_rsyslog_forwarder
 
-  log_info "Gitea version: $(apk list -I 2>/dev/null | awk '/^gitea-[0-9]/{print $1; exit}')"
+  log_info "Gitea version: $(apk info -e -v gitea 2>/dev/null)"
   log_info "Update complete."
 }
 
