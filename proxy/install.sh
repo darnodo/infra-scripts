@@ -157,6 +157,14 @@ main() {
     sudo chown "$USER":"$USER" /var/log/traefik
     sudo touch /var/log/traefik/access.log
 
+    # DEFAULT ignoreip guards every jail below, including gitea-auth: a
+    # misconfigured X-Forwarded-For chain must never be able to ban the
+    # tailnet itself. 100.64.0.0/10 is Tailscale's CGNAT range.
+    sudo tee /etc/fail2ban/jail.local > /dev/null << 'EOF'
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10
+EOF
+
     sudo tee /etc/fail2ban/filter.d/traefik.conf > /dev/null << 'EOF'
 [Definition]
 # Match JSON log lines where ClientHost is the offending IP and DownstreamStatus
@@ -177,6 +185,31 @@ maxretry = 10
 findtime = 5m
 bantime  = 1h
 action   = iptables-multiport[name=traefik, port="80,443", protocol=tcp]
+EOF
+
+    log_info "Configuring Fail2ban for Gitea..."
+    # Gitea returns HTTP 200 on a failed web login (the page is simply
+    # re-rendered with an error) — the traefik-auth jail above, which
+    # matches on DownstreamStatus, is structurally blind to brute force on
+    # the login form. This jail reads the application log instead
+    # (forwarded via rsyslog below), which does log failed attempts.
+    sudo mkdir -p /var/log/gitea
+
+    sudo tee /etc/fail2ban/filter.d/gitea.conf > /dev/null << 'EOF'
+[Definition]
+failregex = .*(Failed authentication attempt|invalid credentials|Attempted access of unknown user).* from <HOST>
+ignoreregex =
+EOF
+
+    sudo tee /etc/fail2ban/jail.d/gitea.conf > /dev/null << 'EOF'
+[gitea-auth]
+enabled  = true
+filter   = gitea
+logpath  = /var/log/gitea/gitea.log
+maxretry = 5
+findtime = 10m
+bantime  = 1h
+action   = iptables-multiport[name=gitea, port="80,443", protocol=tcp]
 EOF
 
     sudo systemctl restart fail2ban
@@ -204,6 +237,30 @@ EOF
 
     sudo tee /etc/logrotate.d/remote-logs > /dev/null << 'EOF'
 /var/log/remote/*.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+
+    log_info "Configuring rsyslog routing for Gitea..."
+    # Routes the "gitea" tag (set by gitea/install.sh's imfile forwarder)
+    # into its own file, on top of the generic 10-remote-receiver.conf
+    # catch-all — the gitea-auth fail2ban jail above reads this file.
+    sudo tee /etc/rsyslog.d/50-gitea.conf > /dev/null << 'EOF'
+$RuleSet remoteLogs
+if $programname == 'gitea' then {
+    action(type="omfile" file="/var/log/gitea/gitea.log")
+    stop
+}
+$RuleSet RSYSLOG_DefaultRuleset
+EOF
+
+    sudo tee /etc/logrotate.d/gitea > /dev/null << 'EOF'
+/var/log/gitea/gitea.log {
     daily
     rotate 7
     compress
@@ -313,22 +370,67 @@ accessLog:
 EOF
 
     # --- conf.d/gitea.yml (dynamic config) ---
+    # NOTE: backend is https://gitea.taila5ad8.ts.net (443, no port) — the
+    # result of gitea/install.sh (#19) moving to `tailscale serve
+    # --https=443`. This is NOT compatible with the previous :3000 backend
+    # of the old community-scripts deployment; only apply this once the
+    # data migration to the new instance has actually happened.
     cat > "$TRAEFIK_DIR/conf.d/gitea.yml" << 'EOF'
 http:
   routers:
+    # /metrics carries the Prometheus bearer token; never expose it publicly.
+    # Highest priority so it wins over the catch-all "gitea" router below.
+    gitea-metrics-deny:
+      rule: "Host(`gitea.arnodo.fr`) && PathPrefix(`/metrics`)"
+      priority: 200
+      entryPoints:
+        - websecure
+      service: gitea
+      middlewares:
+        - deny-public
+      tls:
+        certResolver: letsencrypt
+
+    # Gitea returns HTTP 200 on a failed web login, so the traefik-auth
+    # jail (which matches on DownstreamStatus) can't see login brute
+    # force. Rate-limit the login/signup/forgot-password surface directly
+    # as a second layer on top of the gitea-auth fail2ban jail.
+    gitea-auth:
+      rule: "Host(`gitea.arnodo.fr`) && (Path(`/user/login`) || Path(`/user/sign_up`) || Path(`/user/forgot_password`))"
+      priority: 100
+      entryPoints:
+        - websecure
+      service: gitea
+      middlewares:
+        - auth-ratelimit
+      tls:
+        certResolver: letsencrypt
+
     gitea:
       rule: "Host(`gitea.arnodo.fr`)"
+      priority: 1
       entryPoints:
         - websecure
       service: gitea
       tls:
         certResolver: letsencrypt
 
+  middlewares:
+    auth-ratelimit:
+      rateLimit:
+        average: 6
+        period: 1m
+        burst: 12
+    deny-public:
+      ipAllowList:
+        sourceRange:
+          - "127.0.0.1/32"
+
   services:
     gitea:
       loadBalancer:
         servers:
-          - url: "http://gitea.taila5ad8.ts.net:3000"
+          - url: "https://gitea.taila5ad8.ts.net"
 EOF
 
     log_info "Starting Traefik stack..."
