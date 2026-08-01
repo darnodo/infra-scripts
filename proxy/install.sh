@@ -162,7 +162,9 @@ failregex = ^.*"ClientHost":"<HOST>".*"DownstreamStatus":(401|403|429|5[0-9]{2})
 # WWW-Authenticate challenge, then retries with credentials. That first 401
 # is protocol, not abuse — without this exclusion a handful of git
 # clone/fetch/push in a few minutes bans the client on a private repo.
+# Same two-orderings caveat as failregex above.
 ignoreregex = ^.*"RequestPath":"[^"]*/(info/refs|git-upload-pack|git-receive-pack)[^"]*".*"DownstreamStatus":401
+              ^.*"DownstreamStatus":401.*"RequestPath":"[^"]*/(info/refs|git-upload-pack|git-receive-pack)[^"]*"
 EOF
 
     sudo tee /etc/fail2ban/jail.d/traefik.conf > /dev/null << 'EOF'
