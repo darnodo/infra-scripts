@@ -12,21 +12,17 @@ These scripts automate the deployment of personal infrastructure components. The
 - **Multi-OS**: Supports Debian and Alpine-based deployments, chosen per-script based on that service's requirements
 - **Loopback by default**: Services bind to `127.0.0.1`; Tailscale handles the reverse proxy and TLS termination
 - **Log hygiene**: Every long-running service ships with a `logrotate` config (no unbounded log files)
-- **Console auto-login**: Proxmox LXCs are configured for root auto-login on `tty1` (fast `pct enter` and Web UI shell access)
 - **Keep it simple**: One script per service, plain bash, no frameworks — readability over cleverness
 
 ### Available Scripts
 
-| Script                                     | Description                                           | Usage                                                                                                          |
-| ------------------------------------------ | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| [`proxy/install.sh`](proxy/)               | Reverse proxy with Tailscale + Nginx Proxy Manager    | `curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/proxy/install.sh` \| `bash`           |
-| [`netlab/install.sh`](netlab/)             | Network lab with ContainerLab                         | `curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/netlab/install.sh` \| `bash`          |
-| [`gitea-runner/install.sh`](gitea-runner/) | Gitea Act Runner on Alpine LXC (Proxmox)              | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/gitea-runner/install.sh)"` |
-| [`openbao/install.sh`](openbao/)           | OpenBao secrets manager on Alpine LXC (Proxmox)       | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/openbao/install.sh)"`      |
-| [`komodo/install.sh`](komodo/)             | Komodo (Docker + MongoDB) on Alpine VM                | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/komodo/install.sh)"`       |
+| Script                          | Description                             | Usage                                                                                                     |
+| -------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| [`netlab/install.sh`](netlab/) | Network lab with ContainerLab           | `curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/netlab/install.sh` \| `bash`     |
+| [`komodo/install.sh`](komodo/) | Komodo (Docker + MongoDB) on Alpine VM  | `bash -c "$(curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/komodo/install.sh)"`  |
 
 ### Requirements
 
-- Fresh Debian 12/13 installation (proxy, netlab) or Proxmox VE host (gitea-runner, openbao) or Alpine VM (komodo)
-- User with sudo privileges (do not run as root) — except gitea-runner, openbao, and komodo which run as root
+- Fresh Debian 12/13 installation (netlab) or Alpine VM (komodo)
+- User with sudo privileges (do not run as root) — except komodo, which runs as root
 - Internet access
