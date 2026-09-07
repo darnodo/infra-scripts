@@ -28,9 +28,9 @@ DISK="${DISK:-12}"
 BRIDGE="${BRIDGE:-vmbr0}"
 LXC_TAG="${LXC_TAG:-semaphore}"                   # stable identifier for the container
 SEMAPHORE_VERSION="${SEMAPHORE_VERSION:-latest}"  # "latest" or e.g. "v2.19.12"
-# Upstream ships two builds per release: `semaphore` (Pro features present but
-# licence-gated) and `semaphore_community`. Switch with SEMAPHORE_EDITION=community.
-SEMAPHORE_EDITION="${SEMAPHORE_EDITION:-standard}"
+# Upstream ships two builds per release: `semaphore_community` and `semaphore`
+# (Pro features present but licence-gated). Switch with SEMAPHORE_EDITION=standard.
+SEMAPHORE_EDITION="${SEMAPHORE_EDITION:-community}"
 SEMAPHORE_RELEASES_URL="${SEMAPHORE_RELEASES_URL:-https://api.github.com/repos/semaphoreui/semaphore/releases}"
 # Loopback only — Tailscale is the reverse proxy and terminates TLS.
 SEMAPHORE_LISTEN_ADDR="${SEMAPHORE_LISTEN_ADDR:-127.0.0.1:3000}"
@@ -218,10 +218,10 @@ install_or_upgrade_semaphore() {
 
   # Asset naming: semaphore_<version>_linux_<arch>.tar.gz, with a parallel
   # semaphore_community_<version>_... build.
-  if [[ "$SEMAPHORE_EDITION" == "community" ]]; then
-    asset="semaphore_community_${version}_linux_${arch}.tar.gz"
-  else
+  if [[ "$SEMAPHORE_EDITION" == "standard" ]]; then
     asset="semaphore_${version}_linux_${arch}.tar.gz"
+  else
+    asset="semaphore_community_${version}_linux_${arch}.tar.gz"
   fi
   url="https://github.com/semaphoreui/semaphore/releases/download/${tag}/${asset}"
   log_info "Downloading Semaphore ${tag} (${arch}, ${SEMAPHORE_EDITION}) from ${url}..."
@@ -258,6 +258,53 @@ install_or_upgrade_semaphore() {
   fi
 
   rm -rf "$tmpdir"
+}
+
+# ============================================================
+# Write a ready-to-run config.json, so the operator never has to sit through
+# `semaphore setup`. That wizard defaults to MySQL and, since 2.19, panics on
+# its own BoltDB option — SQLite is the sane single-node backend and the binary
+# ships a pure-Go driver, so nothing extra is needed.
+#
+# Same shape `semaphore setup` produces, plus the `interface` key it omits.
+# Never overwrites an existing config.
+# ============================================================
+write_default_config() {
+  if [[ -f "$SEMAPHORE_CONFIG" ]]; then
+    log_info "Existing ${SEMAPHORE_CONFIG} preserved."
+    return 0
+  fi
+
+  log_info "Writing ${SEMAPHORE_CONFIG} (sqlite, listening on ${SEMAPHORE_LISTEN_ADDR})..."
+  # Three independent 32-byte secrets, exactly as the wizard generates them.
+  # Losing access_key_encryption makes every stored credential unreadable.
+  cat > "$SEMAPHORE_CONFIG" <<EOF
+{
+  "dialect": "sqlite",
+  "sqlite": {
+    "host": "${SEMAPHORE_DATA_DIR}/database.sqlite"
+  },
+  "interface": "${SEMAPHORE_LISTEN_ADDR}",
+  "tmp_path": "${SEMAPHORE_DATA_DIR}/tmp",
+  "cookie_hash": "$(openssl rand -base64 32)",
+  "cookie_encryption": "$(openssl rand -base64 32)",
+  "access_key_encryption": "$(openssl rand -base64 32)"
+}
+EOF
+  chown root:"$SEMAPHORE_USER" "$SEMAPHORE_CONFIG"
+  chmod 640 "$SEMAPHORE_CONFIG"
+}
+
+# ============================================================
+# Reusable: bring the schema up to date. Idempotent — a no-op when the database
+# already matches the binary. Runs as the semaphore user so the SQLite file and
+# its -wal/-shm siblings stay owned by the service.
+# ============================================================
+run_migrations() {
+  [[ -f "$SEMAPHORE_CONFIG" ]] || return 0
+  log_info "Running database migrations..."
+  su -s /bin/sh -c "/usr/local/bin/semaphore migrate --config=${SEMAPHORE_CONFIG}" "$SEMAPHORE_USER" >/dev/null \
+    || { log_error "Migrations failed — inspect: semaphore migrate --config=${SEMAPHORE_CONFIG}"; exit 1; }
 }
 
 # ============================================================
@@ -388,9 +435,10 @@ EOF
   echo "  Hostname : ${HOSTNAME_LXC}"
   echo "  IP       : ${ip:-pending}"
   echo ""
-  echo "Semaphore is installed but not configured. Finish it yourself:"
+  echo "Semaphore is installed and migrated. All that is left is the admin user:"
   echo "  pct enter ${CTID}"
-  echo "  semaphore setup            # writes ${SEMAPHORE_CONFIG}"
+  echo "  semaphore users add --admin --login <login> --name <name> \\"
+  echo "      --email <email> --password <password> --config=${SEMAPHORE_CONFIG}"
   echo "  rc-service semaphore start"
   echo ""
 }
@@ -430,9 +478,10 @@ install_inside_lxc() {
   apk upgrade >/dev/null
 
   log_info "Installing dependencies..."
-  # gcompat: the upstream binaries are glibc-linked, Alpine is musl.
+  # The upstream binary is a static CGO-free build, so no gcompat needed.
   # ansible/opentofu/git/openssh: what Semaphore actually shells out to.
-  apk add --no-cache bash curl jq ca-certificates gcompat openrc logrotate \
+  # openssl: generates the three secrets in config.json.
+  apk add --no-cache bash curl jq ca-certificates openssl openrc logrotate \
     tailscale git openssh-client python3 py3-pip ansible >/dev/null
   # opentofu landed in the community repo; don't fail the install if this
   # Alpine release doesn't carry it.
@@ -452,11 +501,14 @@ install_inside_lxc() {
   fi
 
   log_info "Provisioning directories..."
-  mkdir -p "$SEMAPHORE_CONFIG_DIR" "$SEMAPHORE_DATA_DIR"
+  mkdir -p "$SEMAPHORE_CONFIG_DIR" "$SEMAPHORE_DATA_DIR" "${SEMAPHORE_DATA_DIR}/tmp"
   chown -R "${SEMAPHORE_USER}:${SEMAPHORE_USER}" "$SEMAPHORE_DATA_DIR"
   chmod 750 "$SEMAPHORE_DATA_DIR"
   chown root:"$SEMAPHORE_USER" "$SEMAPHORE_CONFIG_DIR"
   chmod 750 "$SEMAPHORE_CONFIG_DIR"
+
+  write_default_config
+  run_migrations
 
   log_info "Installing OpenRC service..."
   cat > /etc/init.d/semaphore <<'EOF'
@@ -481,7 +533,7 @@ depend() {
 
 start_pre() {
     if [ ! -f /etc/semaphore/config.json ]; then
-        eerror "/etc/semaphore/config.json is missing — run 'semaphore setup' first."
+        eerror "/etc/semaphore/config.json is missing — re-run the install script."
         return 1
     fi
     checkpath --directory --owner semaphore:semaphore --mode 0750 /var/lib/semaphore
@@ -503,8 +555,8 @@ EOF
 EOF
   ln -sf /usr/sbin/logrotate /etc/periodic/daily/logrotate 2>/dev/null || true
 
-  # No-op on a fresh install (setup hasn't run yet), but keeps the two flows
-  # symmetrical when the script is re-run inside a half-configured container.
+  # Ours already binds the loopback; this only matters when the operator
+  # hand-wrote a config before running the script.
   enforce_loopback_listener
 
   enable_tty1_autologin
@@ -523,7 +575,7 @@ TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
 SEM_VERSION=$(cat /opt/semaphore_version.txt 2>/dev/null || echo "unknown")
 
 if [ ! -f /etc/semaphore/config.json ]; then
-    SEM_STATE="not configured (run: semaphore setup)"
+    SEM_STATE="no config (re-run the install script)"
 elif rc-service semaphore status >/dev/null 2>&1; then
     SEM_STATE="running"
 else
@@ -546,8 +598,8 @@ echo "  • Tailnet : https://${TS_FQDN}"
 echo "  • State   : ${SEM_STATE}"
 echo ""
 echo "Useful commands:"
-echo "  semaphore setup                  # first-time configuration"
-echo "  semaphore user list --config=/etc/semaphore/config.json"
+echo "  semaphore users list --config=/etc/semaphore/config.json"
+echo "  semaphore users add --admin --config=/etc/semaphore/config.json ..."
 echo "  rc-service semaphore status"
 echo "  tail -f /var/log/semaphore.log"
 echo "─────────────────────────────────────────"
@@ -563,21 +615,17 @@ MOTD
   log_info "Semaphore installation complete!"
   log_info "========================================="
   echo ""
-  echo "The service is enabled but will not start until you configure it:"
+  echo "Config written to ${SEMAPHORE_CONFIG} (sqlite, ${SEMAPHORE_LISTEN_ADDR})"
+  echo "and the schema is migrated. No 'semaphore setup' needed."
   echo ""
-  echo "  semaphore setup"
-  echo "      Answer the prompts (BoltDB is the simplest backend:"
-  echo "      ${SEMAPHORE_DATA_DIR}/database.boltdb), then move the generated"
-  echo "      config.json to ${SEMAPHORE_CONFIG}:"
+  echo "Create the admin user, then start the service:"
   echo ""
-  echo "  mv config.json ${SEMAPHORE_CONFIG}"
-  echo "  chown root:${SEMAPHORE_USER} ${SEMAPHORE_CONFIG} && chmod 640 ${SEMAPHORE_CONFIG}"
-  echo "  chown -R ${SEMAPHORE_USER}:${SEMAPHORE_USER} ${SEMAPHORE_DATA_DIR}"
-  echo ""
-  echo "  Set \"interface\": \"${SEMAPHORE_LISTEN_ADDR}\" in config.json"
-  echo "  (re-running this script rewrites it for you), then:"
-  echo ""
+  echo "  semaphore users add --admin --login <login> --name <name> \\"
+  echo "      --email <email> --password <password> --config=${SEMAPHORE_CONFIG}"
   echo "  rc-service semaphore start"
+  echo ""
+  echo "Back up ${SEMAPHORE_CONFIG}: without access_key_encryption every stored"
+  echo "credential becomes unreadable."
   echo ""
 }
 
@@ -588,6 +636,7 @@ update_inside_lxc() {
   log_info "=== Semaphore — update ==="
   refresh_os_packages
   install_or_upgrade_semaphore
+  run_migrations
   enforce_loopback_listener
   configure_tailscale_proxy
   log_info "Update complete."
