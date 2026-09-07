@@ -98,18 +98,27 @@ resolve_semaphore_version() {
 # Proxmox-host helpers
 # ============================================================
 
-# Pick the newest Alpine LXC template the Proxmox repos advertise. Falls back to
-# a hardcoded known-good template if `pveam` is unavailable or returns nothing.
+# Pick the newest Alpine LXC template the Proxmox repos advertise, for this
+# host's architecture. Falls back to a hardcoded known-good template if `pveam`
+# is unavailable or returns nothing.
+#
+# The arch filter is not optional: `pveam available` lists every architecture
+# together, and at equal version `arm64` sorts after `amd64`, so an unfiltered
+# `sort -V | tail -n1` hands an x86 host an ARM rootfs. The container then dies
+# at `pct start` with a bare "sync_wait ... sequence number 7", which says
+# nothing about architecture.
 detect_latest_alpine_template() {
-  local tmpl
+  local arch tmpl
+  arch=$(get_arch)
+
   tmpl=$(pveam available --section system 2>/dev/null \
-    | awk '/^system[[:space:]]+alpine-/ {print $2}' \
+    | awk -v suffix="_${arch}." '/^system[[:space:]]+alpine-/ && index($2, suffix) {print $2}' \
     | sort -V \
     | tail -n1)
 
   if [[ -z "$tmpl" ]]; then
     log_warn "Could not query pveam; falling back to a known-good Alpine template."
-    tmpl="alpine-3.22-default_20250617_amd64.tar.xz"
+    tmpl="alpine-3.22-default_20250617_${arch}.tar.xz"
   fi
   log_info "Selected Alpine template: $tmpl"
   echo "$tmpl"
