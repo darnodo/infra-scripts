@@ -37,8 +37,9 @@ SEMAPHORE_LISTEN_ADDR="${SEMAPHORE_LISTEN_ADDR:-127.0.0.1:3000}"
 # Optional: pre-authorise the LXC's Tailscale non-interactively.
 # Generate at https://login.tailscale.com/admin/settings/keys
 TS_AUTHKEY="${TS_AUTHKEY:-}"
-# SCRIPT_URL is what the host-side flow pipes into the LXC. Override it when
-# testing from a non-main branch.
+# The host curls SCRIPT_URL and pipes the result into `pct exec`, so this only
+# ever has to be reachable from the Proxmox host. A file:// URL works, which is
+# how you test an unpushed branch.
 SCRIPT_URL="${SCRIPT_URL:-https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/semaphore/install.sh}"
 VERSION_FILE="${VERSION_FILE:-/opt/semaphore_version.txt}"
 SEMAPHORE_USER="semaphore"
@@ -159,7 +160,6 @@ exec_in_lxc() {
   pct exec "$ctid" -- sh -c "apk add --no-cache bash curl jq ca-certificates >/dev/null 2>&1"
   curl -fsSL "$SCRIPT_URL" \
     | pct exec "$ctid" -- env \
-        SCRIPT_URL="$SCRIPT_URL" \
         SEMAPHORE_VERSION="$SEMAPHORE_VERSION" \
         SEMAPHORE_EDITION="$SEMAPHORE_EDITION" \
         SEMAPHORE_HOSTNAME="$HOSTNAME_LXC" \
