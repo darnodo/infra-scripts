@@ -45,11 +45,16 @@ node, and the upstream binary carries a pure-Go driver, so there is nothing to c
 {
   "dialect": "sqlite",
   "sqlite": { "host": "/var/lib/semaphore/database.sqlite" },
-  "interface": "127.0.0.1:3000",
+  "interface": "127.0.0.1",
+  "port": ":3000",
   "tmp_path": "/var/lib/semaphore/tmp",
   "cookie_hash": "...", "cookie_encryption": "...", "access_key_encryption": "..."
 }
 ```
+
+Semaphore joins `interface` and `port` to build its bind address, so the host and the port
+go in separate keys. Put `127.0.0.1:3000` in `interface` alone and the server panics on
+`too many colons in address`.
 
 The three secrets are 32 random bytes each, generated on first install. Back this file up: if
 you lose `access_key_encryption`, every credential Semaphore has stored becomes unreadable.
@@ -66,8 +71,8 @@ rc-service semaphore start
 ```
 
 For a real database, edit `config.json` to a `mysql` or `postgres` dialect and re-run the
-script. It leaves the file alone apart from the `interface` key, which it pins back to
-`127.0.0.1:3000` on every pass.
+script. It leaves the file alone apart from `interface` and `port`, which it pins back to
+the loopback on every pass.
 
 The OpenRC service refuses to start while `/etc/semaphore/config.json` is missing, so a
 half-finished install fails where you can see it.
@@ -80,7 +85,7 @@ half-finished install fails where you can see it.
 | `SEMAPHORE_HOSTNAME` | `semaphore` | LXC hostname, also the Tailscale node name |
 | `SEMAPHORE_VERSION` | `latest` | Release tag, e.g. `v2.19.12` |
 | `SEMAPHORE_EDITION` | `community` | `standard` picks the licence-gated Pro build instead |
-| `SEMAPHORE_LISTEN_ADDR` | `127.0.0.1:3000` | Value forced into `config.json`'s `interface` |
+| `SEMAPHORE_LISTEN_ADDR` | `127.0.0.1:3000` | Split across `config.json`'s `interface` and `port` |
 | `TEMPLATE` | _(newest Alpine)_ | Override the auto-detected LXC template |
 | `STORAGE` / `TEMPLATE_STORAGE` | `local-lvm` / `local` | Proxmox storages |
 | `CORES` / `RAM` / `DISK` | `2` / `2048` / `12` | Container sizing (MB / GB) |
@@ -106,4 +111,4 @@ half-finished install fails where you can see it.
 
 Binary upgrades keep a timestamped backup at `/usr/local/bin/semaphore.bak.<epoch>`. The
 service stops before the swap and restarts after, then `semaphore migrate` brings the schema
-forward. Nothing touches `config.json` beyond the `interface` key.
+forward. Nothing touches `config.json` beyond the `interface` and `port` keys.

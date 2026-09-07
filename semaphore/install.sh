@@ -33,6 +33,9 @@ SEMAPHORE_VERSION="${SEMAPHORE_VERSION:-latest}"  # "latest" or e.g. "v2.19.12"
 SEMAPHORE_EDITION="${SEMAPHORE_EDITION:-community}"
 SEMAPHORE_RELEASES_URL="${SEMAPHORE_RELEASES_URL:-https://api.github.com/repos/semaphoreui/semaphore/releases}"
 # Loopback only. Tailscale is the reverse proxy and terminates TLS.
+# Split into config.json's `interface` and `port` keys, which Semaphore
+# concatenates: putting the whole "host:port" in `interface` yields a bind
+# address of "127.0.0.1:3000:3000" and the server panics on startup.
 SEMAPHORE_LISTEN_ADDR="${SEMAPHORE_LISTEN_ADDR:-127.0.0.1:3000}"
 # Optional: pre-authorise the LXC's Tailscale non-interactively.
 # Generate at https://login.tailscale.com/admin/settings/keys
@@ -293,7 +296,8 @@ write_default_config() {
   "sqlite": {
     "host": "${SEMAPHORE_DATA_DIR}/database.sqlite"
   },
-  "interface": "${SEMAPHORE_LISTEN_ADDR}",
+  "interface": "${SEMAPHORE_LISTEN_ADDR%:*}",
+  "port": ":${SEMAPHORE_LISTEN_ADDR##*:}",
   "tmp_path": "${SEMAPHORE_DATA_DIR}/tmp",
   "cookie_hash": "$(openssl rand -base64 32)",
   "cookie_encryption": "$(openssl rand -base64 32)",
@@ -317,23 +321,28 @@ run_migrations() {
 }
 
 # ============================================================
-# Reusable: force the listener back onto the loopback address.
-# `semaphore setup` writes "interface": ":3000" (all interfaces); this rewrites
-# it once the config exists. No-op before the operator has run setup.
+# Reusable: force the listener back onto the loopback address, by setting both
+# keys Semaphore joins to build its bind address. A hand-written config that
+# left `interface` empty listens on every interface; one that crammed
+# "host:port" into `interface` panics at startup. Both are repaired here.
+# No-op when the two keys already hold the wanted values.
 # ============================================================
 enforce_loopback_listener() {
   [[ -f "$SEMAPHORE_CONFIG" ]] || return 0
 
-  local current
-  current=$(jq -r '.interface // ""' "$SEMAPHORE_CONFIG")
-  if [[ "$current" == "$SEMAPHORE_LISTEN_ADDR" ]]; then
+  local host port
+  host="${SEMAPHORE_LISTEN_ADDR%:*}"
+  port=":${SEMAPHORE_LISTEN_ADDR##*:}"
+
+  if [[ "$(jq -r '.interface // ""' "$SEMAPHORE_CONFIG")" == "$host" \
+     && "$(jq -r '.port // ""' "$SEMAPHORE_CONFIG")" == "$port" ]]; then
     return 0
   fi
 
-  log_info "Rewriting config.json interface '${current}' -> '${SEMAPHORE_LISTEN_ADDR}'..."
+  log_info "Pinning config.json listener to ${host}${port}..."
   local tmp
   tmp=$(mktemp)
-  jq --arg addr "$SEMAPHORE_LISTEN_ADDR" '.interface = $addr' "$SEMAPHORE_CONFIG" > "$tmp"
+  jq --arg h "$host" --arg p "$port" '.interface = $h | .port = $p' "$SEMAPHORE_CONFIG" > "$tmp"
   cat "$tmp" > "$SEMAPHORE_CONFIG"   # preserve ownership/mode of the original
   rm -f "$tmp"
 }
