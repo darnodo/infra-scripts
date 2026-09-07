@@ -9,9 +9,9 @@
 #   2. Proxmox host, container already present -> refresh packages + upgrade Semaphore
 #   3. Inside an LXC                           -> install if missing, otherwise update
 #
-# Deliberately stops short of `semaphore setup`: the database choice, the admin
-# account and the encryption key are yours to make. The script installs the
-# binary, Ansible, OpenTofu and an OpenRC service, then hands over.
+# The script writes config.json and runs the migrations itself, so
+# `semaphore setup` is never needed. It stops before creating the admin user
+# and before starting the service: both are yours to do.
 # See: https://semaphoreui.com/docs/admin-guide/installation/binary-file
 
 set -euo pipefail
@@ -32,7 +32,7 @@ SEMAPHORE_VERSION="${SEMAPHORE_VERSION:-latest}"  # "latest" or e.g. "v2.19.12"
 # (Pro features present but licence-gated). Switch with SEMAPHORE_EDITION=standard.
 SEMAPHORE_EDITION="${SEMAPHORE_EDITION:-community}"
 SEMAPHORE_RELEASES_URL="${SEMAPHORE_RELEASES_URL:-https://api.github.com/repos/semaphoreui/semaphore/releases}"
-# Loopback only — Tailscale is the reverse proxy and terminates TLS.
+# Loopback only. Tailscale is the reverse proxy and terminates TLS.
 SEMAPHORE_LISTEN_ADDR="${SEMAPHORE_LISTEN_ADDR:-127.0.0.1:3000}"
 # Optional: pre-authorise the LXC's Tailscale non-interactively.
 # Generate at https://login.tailscale.com/admin/settings/keys
@@ -191,7 +191,7 @@ enable_tty1_autologin() {
   kill -HUP 1 2>/dev/null || true
 
   # Kick any getty still attached to tty1 so init respawns it now with the new
-  # line — otherwise the first console session lands on the stale process.
+  # line. Otherwise the first console session lands on the stale process.
   pkill -KILL -f '(getty|agetty).*tty1' 2>/dev/null || true
 }
 
@@ -261,10 +261,10 @@ install_or_upgrade_semaphore() {
 }
 
 # ============================================================
-# Write a ready-to-run config.json, so the operator never has to sit through
+# Write a ready-to-run config.json so the operator never has to sit through
 # `semaphore setup`. That wizard defaults to MySQL and, since 2.19, panics on
-# its own BoltDB option — SQLite is the sane single-node backend and the binary
-# ships a pure-Go driver, so nothing extra is needed.
+# its own BoltDB option. SQLite is the obvious single-node backend here, and
+# the binary ships a pure-Go driver, so nothing extra is needed.
 #
 # Same shape `semaphore setup` produces, plus the `interface` key it omits.
 # Never overwrites an existing config.
@@ -296,7 +296,7 @@ EOF
 }
 
 # ============================================================
-# Reusable: bring the schema up to date. Idempotent — a no-op when the database
+# Reusable: bring the schema up to date. Idempotent: a no-op when the database
 # already matches the binary. Runs as the semaphore user so the SQLite file and
 # its -wal/-shm siblings stay owned by the service.
 # ============================================================
@@ -304,7 +304,7 @@ run_migrations() {
   [[ -f "$SEMAPHORE_CONFIG" ]] || return 0
   log_info "Running database migrations..."
   su -s /bin/sh -c "/usr/local/bin/semaphore migrate --config=${SEMAPHORE_CONFIG}" "$SEMAPHORE_USER" >/dev/null \
-    || { log_error "Migrations failed — inspect: semaphore migrate --config=${SEMAPHORE_CONFIG}"; exit 1; }
+    || { log_error "Migrations failed. Inspect with: semaphore migrate --config=${SEMAPHORE_CONFIG}"; exit 1; }
 }
 
 # ============================================================
@@ -345,7 +345,7 @@ configure_tailscale_proxy() {
     if [[ -n "$TS_AUTHKEY" ]]; then
       log_info "Bringing Tailscale up with the provided auth key..."
       tailscale up --authkey "$TS_AUTHKEY" --ssh --hostname "$HOSTNAME_LXC" \
-        || log_warn "tailscale up failed — run it manually inside the LXC."
+        || log_warn "tailscale up failed. Run it manually inside the LXC."
     else
       log_warn "Tailscale is not authenticated and TS_AUTHKEY was not supplied."
       log_warn "Finish setup inside the LXC with: tailscale up --ssh"
@@ -359,7 +359,7 @@ configure_tailscale_proxy() {
   else
     log_info "Publishing Semaphore on the tailnet via 'tailscale serve' (HTTPS:443)..."
     tailscale serve --bg --https=443 "http://${SEMAPHORE_LISTEN_ADDR}" \
-      || log_warn "tailscale serve failed — enable HTTPS on your tailnet and retry."
+      || log_warn "tailscale serve failed. Enable HTTPS on your tailnet and retry."
   fi
 
   local fqdn
@@ -370,10 +370,10 @@ configure_tailscale_proxy() {
 }
 
 # ============================================================
-# MODE: Proxmox host — create LXC + install
+# MODE: Proxmox host, create LXC + install
 # ============================================================
 create_lxc() {
-  log_info "=== Semaphore — LXC creation ==="
+  log_info "=== Semaphore: LXC creation ==="
 
   if [[ -z "$TEMPLATE" ]]; then
     TEMPLATE=$(detect_latest_alpine_template)
@@ -435,7 +435,7 @@ EOF
   echo "  Hostname : ${HOSTNAME_LXC}"
   echo "  IP       : ${ip:-pending}"
   echo ""
-  echo "Semaphore is installed and migrated. All that is left is the admin user:"
+  echo "Semaphore is installed and its database is migrated. Add the admin user:"
   echo "  pct enter ${CTID}"
   echo "  semaphore users add --admin --login <login> --name <name> \\"
   echo "      --email <email> --password <password> --config=${SEMAPHORE_CONFIG}"
@@ -444,11 +444,11 @@ EOF
 }
 
 # ============================================================
-# MODE: Proxmox host — update existing LXC
+# MODE: Proxmox host, update existing LXC
 # ============================================================
 update_lxc() {
   local ctid="$1"
-  log_info "=== Semaphore — updating existing LXC ${ctid} ==="
+  log_info "=== Semaphore: updating existing LXC ${ctid} ==="
 
   if ! pct status "$ctid" | grep -q running; then
     log_info "Starting LXC ${ctid}..."
@@ -468,17 +468,17 @@ update_lxc() {
 }
 
 # ============================================================
-# MODE: inside LXC — fresh install
+# MODE: inside LXC, fresh install
 # ============================================================
 install_inside_lxc() {
-  log_info "=== Semaphore — installation ==="
+  log_info "=== Semaphore: installation ==="
 
   log_info "Updating package index..."
   apk update >/dev/null
   apk upgrade >/dev/null
 
   log_info "Installing dependencies..."
-  # The upstream binary is a static CGO-free build, so no gcompat needed.
+  # The upstream binary is a static CGO-free build, so gcompat is unnecessary.
   # ansible/opentofu/git/openssh: what Semaphore actually shells out to.
   # openssl: generates the three secrets in config.json.
   apk add --no-cache bash curl jq ca-certificates openssl openrc logrotate \
@@ -486,7 +486,7 @@ install_inside_lxc() {
   # opentofu landed in the community repo; don't fail the install if this
   # Alpine release doesn't carry it.
   apk add --no-cache opentofu >/dev/null 2>&1 \
-    || log_warn "opentofu not available in this Alpine's repos — install it by hand if you need Terraform tasks."
+    || log_warn "opentofu is not in this Alpine's repos. Install it by hand if you need Terraform tasks."
 
   log_info "Enabling tailscaled..."
   rc-update add tailscale default >/dev/null 2>&1 || true
@@ -533,7 +533,7 @@ depend() {
 
 start_pre() {
     if [ ! -f /etc/semaphore/config.json ]; then
-        eerror "/etc/semaphore/config.json is missing — re-run the install script."
+        eerror "/etc/semaphore/config.json is missing. Re-run the install script."
         return 1
     fi
     checkpath --directory --owner semaphore:semaphore --mode 0750 /var/lib/semaphore
@@ -563,7 +563,7 @@ EOF
   configure_tailscale_proxy
 
   log_info "Configuring MOTD..."
-  # /etc/profile.d/ runs for every interactive login shell — the auto-login tty
+  # /etc/profile.d/ runs for every interactive login shell, the auto-login tty
   # and Tailscale SSH alike. Quoted heredoc: everything resolves at login time.
   cat > /etc/profile.d/00-semaphore.sh <<'MOTD'
 TS_FQDN=$(tailscale status --json 2>/dev/null | awk -F'"' '
@@ -616,7 +616,7 @@ MOTD
   log_info "========================================="
   echo ""
   echo "Config written to ${SEMAPHORE_CONFIG} (sqlite, ${SEMAPHORE_LISTEN_ADDR})"
-  echo "and the schema is migrated. No 'semaphore setup' needed."
+  echo "and the schema is migrated. You do not need to run 'semaphore setup'."
   echo ""
   echo "Create the admin user, then start the service:"
   echo ""
@@ -630,10 +630,10 @@ MOTD
 }
 
 # ============================================================
-# MODE: inside LXC — update only
+# MODE: inside LXC, update only
 # ============================================================
 update_inside_lxc() {
-  log_info "=== Semaphore — update ==="
+  log_info "=== Semaphore: update ==="
   refresh_os_packages
   install_or_upgrade_semaphore
   run_migrations
@@ -643,7 +643,7 @@ update_inside_lxc() {
 }
 
 # ============================================================
-# Main — dispatch on explicit mode flag or auto-detect context
+# Main: dispatch on explicit mode flag, or auto-detect the context
 # ============================================================
 main() {
   case "${1:-}" in
@@ -663,7 +663,7 @@ main() {
 
     local existing=""
     if existing=$(find_existing_lxc); then
-      log_info "Found existing Semaphore LXC (CTID ${existing}, hostname/tag match) — switching to update mode."
+      log_info "Found an existing Semaphore LXC (CTID ${existing}, hostname/tag match). Switching to update mode."
       update_lxc "$existing"
     else
       create_lxc

@@ -1,20 +1,18 @@
 # infra-scripts
 
-Public infrastructure deployment scripts designed to be executed directly via `curl | bash`.
+Public infrastructure deployment scripts, meant to be run straight from `curl | bash`.
 
 ### Philosophy
 
-These scripts automate the deployment of personal infrastructure components. They are:
+- One file per service. No dependencies beyond what the distro ships.
+- Safe to re-run, wherever that is achievable.
+- Written for a one-liner from a fresh host.
+- The same script creates the LXC from the Proxmox host and updates the service from inside it. It works out which one it is on its own.
+- Services bind to `127.0.0.1`. Tailscale is the reverse proxy and terminates TLS.
+- Anything long-running ships with a `logrotate` config, so no log file grows without bound.
+- Plain bash, no frameworks. Readability beats cleverness.
 
-- **Self-contained**: one file per service, no external dependencies beyond the distro's packages
-- **Idempotent-ish**: safe to re-run (where possible)
-- **Curl-friendly**: designed for one-liner deployment from a fresh host
-- **Context-aware**: the same script creates the LXC from the Proxmox host, or updates the service from inside it
-- **Loopback by default**: services bind to `127.0.0.1`; Tailscale handles the reverse proxy and TLS termination
-- **Log hygiene**: every long-running service ships with a `logrotate` config (no unbounded log files)
-- **Keep it simple**: plain bash, no frameworks — readability over cleverness
-
-### Available Scripts
+### Available scripts
 
 | Script | Description | Usage |
 | --- | --- | --- |
@@ -22,6 +20,6 @@ These scripts automate the deployment of personal infrastructure components. The
 
 ### Requirements
 
-- Proxmox VE host (or the target LXC, for update runs)
+- A Proxmox VE host, or the target LXC for update runs
 - Run as root
 - Internet access
