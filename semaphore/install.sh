@@ -461,7 +461,12 @@ update_lxc() {
 
   if ! pct status "$ctid" | grep -q running; then
     log_info "Starting LXC ${ctid}..."
-    pct start "$ctid"
+    if ! pct start "$ctid"; then
+      log_error "LXC ${ctid} exists but will not start, so there is nothing to update."
+      log_error "Inspect it with: pct start ${ctid} --debug"
+      log_error "If it is a leftover from a failed install: pct destroy ${ctid}"
+      exit 1
+    fi
     sleep 3
   fi
 
