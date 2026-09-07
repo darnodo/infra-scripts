@@ -1,28 +1,25 @@
 # infra-scripts
 
-Public infrastructure deployment scripts designed to be executed directly via `curl | bash`.
+Public infrastructure deployment scripts, meant to be run straight from `curl | bash`.
 
 ### Philosophy
 
-These scripts automate the deployment of personal infrastructure components. They are:
+- One file per service. No dependencies beyond what the distro ships.
+- Safe to re-run, wherever that is achievable.
+- Written for a one-liner from a fresh host.
+- The same script creates the LXC from the Proxmox host and updates the service from inside it. It works out which one it is on its own.
+- Services bind to `127.0.0.1`. Tailscale is the reverse proxy and terminates TLS.
+- Anything long-running ships with a `logrotate` config, so no log file grows without bound.
+- Plain bash, no frameworks. Readability beats cleverness.
 
-- **Self-contained**: No external dependencies beyond standard Debian packages
-- **Idempotent-ish**: Safe to re-run (where possible)
-- **Curl-friendly**: Designed for one-liner deployment from a fresh server
-- **Multi-OS**: Supports Debian and Alpine-based deployments, chosen per-script based on that service's requirements
-- **Loopback by default**: Services bind to `127.0.0.1`; Tailscale handles the reverse proxy and TLS termination
-- **Log hygiene**: Every long-running service ships with a `logrotate` config (no unbounded log files)
-- **Keep it simple**: One script per service, plain bash, no frameworks — readability over cleverness
+### Available scripts
 
-### Available Scripts
-
-| Script                          | Description                             | Usage                                                                                                     |
-| -------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [`netlab/install.sh`](netlab/) | Network lab with ContainerLab           | `curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/netlab/install.sh` \| `bash`     |
-| [`komodo/install.sh`](komodo/) | Komodo (Docker + MongoDB) on Alpine VM  | `bash -c "$(curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/komodo/install.sh)"`  |
+| Script | Description | Usage |
+| --- | --- | --- |
+| [`semaphore/install.sh`](semaphore/) | Semaphore UI (Ansible / OpenTofu) in an Alpine LXC | `bash -c "$(curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/semaphore/install.sh)"` |
 
 ### Requirements
 
-- Fresh Debian 12/13 installation (netlab) or Alpine VM (komodo)
-- User with sudo privileges (do not run as root) — except komodo, which runs as root
+- A Proxmox VE host, or the target LXC for update runs
+- Run as root
 - Internet access
