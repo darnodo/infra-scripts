@@ -523,6 +523,18 @@ install_inside_lxc() {
     adduser -S -D -H -h "$SEMAPHORE_DATA_DIR" -s /bin/sh -G "$SEMAPHORE_USER" "$SEMAPHORE_USER"
   fi
 
+  log_info "Setting the ${SEMAPHORE_USER} user's PATH..."
+  # The account has no home directory, so an interactive shell reads
+  # /etc/profile and nothing else. This snippet runs for every user, but it
+  # only prepends a path that is already correct for root.
+  cat > /etc/profile.d/10-local-bin.sh <<'EOF'
+case ":$PATH:" in
+    *:/usr/local/bin:*) ;;
+    *) export PATH="/usr/local/bin:/usr/local/sbin:$PATH" ;;
+esac
+EOF
+  chmod +x /etc/profile.d/10-local-bin.sh
+
   log_info "Provisioning directories..."
   mkdir -p "$SEMAPHORE_CONFIG_DIR" "$SEMAPHORE_DATA_DIR" "${SEMAPHORE_DATA_DIR}/tmp"
   chown -R "${SEMAPHORE_USER}:${SEMAPHORE_USER}" "$SEMAPHORE_DATA_DIR"
@@ -545,6 +557,11 @@ command_user="semaphore:semaphore"
 command_background=true
 pidfile="/run/${RC_SVCNAME}.pid"
 directory="/var/lib/semaphore"
+
+# Semaphore spawns ansible, tofu and git as child processes and passes them its
+# own environment, so /usr/local/bin has to be on the PATH here rather than in
+# a login profile the service never reads.
+export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 
 output_log="/var/log/semaphore.log"
 error_log="/var/log/semaphore.log"

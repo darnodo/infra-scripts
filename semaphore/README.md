@@ -102,7 +102,8 @@ half-finished install fails where you can see it.
 - Ansible, OpenTofu, git, openssh-client, python3, which is what Semaphore shells out to
 - A `semaphore` system user, `/etc/semaphore` (0750) and `/var/lib/semaphore` (0750)
 - `config.json` (0640, `root:semaphore`) and a migrated SQLite database
-- An OpenRC service `semaphore`, enabled at boot, logging to `/var/log/semaphore.log`
+- An OpenRC service `semaphore`, enabled at boot, logging to `/var/log/semaphore.log`,
+  with `/usr/local/bin` on its PATH so the tasks it spawns can find the binary
 - A logrotate config, daily, 7 days
 - Tailscale, plus `tailscale serve --https=443` pointed at the loopback listener
 - Root auto-login on tty1, and a MOTD showing the version, the tailnet FQDN and service state
