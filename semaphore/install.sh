@@ -1,7 +1,7 @@
 #!/bin/bash
 # install.sh - Semaphore UI: LXC creation, installation & update
 # Usage:
-#   From Proxmox host : bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/semaphore/install.sh)"
+#   From Proxmox host : bash -c "$(curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/semaphore/install.sh)"
 #   From inside LXC   : bash /root/install.sh           (updates the semaphore binary)
 #
 # Single entrypoint, three automatic modes:
@@ -40,7 +40,7 @@ TS_AUTHKEY="${TS_AUTHKEY:-}"
 # The host curls SCRIPT_URL and pipes the result into `pct exec`, so this only
 # ever has to be reachable from the Proxmox host. A file:// URL works, which is
 # how you test an unpushed branch.
-SCRIPT_URL="${SCRIPT_URL:-https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/semaphore/install.sh}"
+SCRIPT_URL="${SCRIPT_URL:-https://raw.githubusercontent.com/darnodo/infra-scripts/main/semaphore/install.sh}"
 VERSION_FILE="${VERSION_FILE:-/opt/semaphore_version.txt}"
 SEMAPHORE_USER="semaphore"
 SEMAPHORE_CONFIG_DIR="/etc/semaphore"

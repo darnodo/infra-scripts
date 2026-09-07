@@ -28,7 +28,7 @@ The presence of `pct` is what decides host or container. You never pass a flag.
 From the Proxmox host shell:
 
 ```bash
-bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/semaphore/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/semaphore/install.sh)"
 ```
 
 Run the same one-liner again later to upgrade. It finds the existing container and switches to

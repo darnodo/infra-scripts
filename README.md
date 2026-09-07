@@ -16,7 +16,7 @@ Public infrastructure deployment scripts, meant to be run straight from `curl | 
 
 | Script | Description | Usage |
 | --- | --- | --- |
-| [`semaphore/install.sh`](semaphore/) | Semaphore UI (Ansible / OpenTofu) in an Alpine LXC | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/semaphore/install.sh)"` |
+| [`semaphore/install.sh`](semaphore/) | Semaphore UI (Ansible / OpenTofu) in an Alpine LXC | `bash -c "$(curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/semaphore/install.sh)"` |
 
 ### Requirements
 
