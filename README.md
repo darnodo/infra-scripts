@@ -6,23 +6,22 @@ Public infrastructure deployment scripts designed to be executed directly via `c
 
 These scripts automate the deployment of personal infrastructure components. They are:
 
-- **Self-contained**: No external dependencies beyond standard Debian packages
-- **Idempotent-ish**: Safe to re-run (where possible)
-- **Curl-friendly**: Designed for one-liner deployment from a fresh server
-- **Multi-OS**: Supports Debian and Alpine-based deployments, chosen per-script based on that service's requirements
-- **Loopback by default**: Services bind to `127.0.0.1`; Tailscale handles the reverse proxy and TLS termination
-- **Log hygiene**: Every long-running service ships with a `logrotate` config (no unbounded log files)
-- **Keep it simple**: One script per service, plain bash, no frameworks — readability over cleverness
+- **Self-contained**: one file per service, no external dependencies beyond the distro's packages
+- **Idempotent-ish**: safe to re-run (where possible)
+- **Curl-friendly**: designed for one-liner deployment from a fresh host
+- **Context-aware**: the same script creates the LXC from the Proxmox host, or updates the service from inside it
+- **Loopback by default**: services bind to `127.0.0.1`; Tailscale handles the reverse proxy and TLS termination
+- **Log hygiene**: every long-running service ships with a `logrotate` config (no unbounded log files)
+- **Keep it simple**: plain bash, no frameworks — readability over cleverness
 
 ### Available Scripts
 
-| Script                          | Description                             | Usage                                                                                                     |
-| -------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [`netlab/install.sh`](netlab/) | Network lab with ContainerLab           | `curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/netlab/install.sh` \| `bash`     |
-| [`komodo/install.sh`](komodo/) | Komodo (Docker + MongoDB) on Alpine VM  | `bash -c "$(curl -fsSL https://raw.githubusercontent.com/darnodo/infra-scripts/main/komodo/install.sh)"`  |
+| Script | Description | Usage |
+| --- | --- | --- |
+| [`semaphore/install.sh`](semaphore/) | Semaphore UI (Ansible / OpenTofu) in an Alpine LXC | `bash -c "$(curl -fsSL https://gitea.arnodo.fr/Damien/infra-scripts/raw/branch/main/semaphore/install.sh)"` |
 
 ### Requirements
 
-- Fresh Debian 12/13 installation (netlab) or Alpine VM (komodo)
-- User with sudo privileges (do not run as root) — except komodo, which runs as root
+- Proxmox VE host (or the target LXC, for update runs)
+- Run as root
 - Internet access
