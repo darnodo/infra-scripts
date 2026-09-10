@@ -9,11 +9,11 @@ the reverse proxy and terminates TLS with tailnet certificates.
 
 ### Three modes, one entrypoint
 
-| Context | Action |
-| --- | --- |
-| Proxmox host, no matching LXC | Downloads the newest Alpine template, creates the LXC, installs Semaphore inside it |
-| Proxmox host, LXC already exists (hostname or `semaphore` tag) | `apk upgrade`, then upgrades the Semaphore binary |
-| Inside an LXC | Installs if `/usr/local/bin/semaphore` is missing, otherwise updates |
+| Context                                                        | Action                                                                              |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Proxmox host, no matching LXC                                  | Downloads the newest Alpine template, creates the LXC, installs Semaphore inside it |
+| Proxmox host, LXC already exists (hostname or `semaphore` tag) | `apk upgrade`, then upgrades the Semaphore binary                                   |
+| Inside an LXC                                                  | Installs if `/usr/local/bin/semaphore` is missing, otherwise updates                |
 
 The presence of `pct` is what decides host or container. You never pass a flag.
 
@@ -79,20 +79,20 @@ half-finished install fails where you can see it.
 
 ### Environment variables
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `CTID` | _(next free id)_ | Container ID |
-| `SEMAPHORE_HOSTNAME` | `semaphore` | LXC hostname, also the Tailscale node name |
-| `SEMAPHORE_VERSION` | `latest` | Release tag, e.g. `v2.19.12` |
-| `SEMAPHORE_EDITION` | `community` | `standard` picks the licence-gated Pro build instead |
-| `SEMAPHORE_LISTEN_ADDR` | `127.0.0.1:3000` | Split across `config.json`'s `interface` and `port` |
-| `TEMPLATE` | _(newest Alpine)_ | Override the auto-detected LXC template |
-| `STORAGE` / `TEMPLATE_STORAGE` | `local-lvm` / `local` | Proxmox storages |
-| `CORES` / `RAM` / `DISK` | `2` / `2048` / `12` | Container sizing (MB / GB) |
-| `BRIDGE` | `vmbr0` | Network bridge |
-| `LXC_TAG` | `semaphore` | Tag used to recognise the container on re-runs |
-| `TS_AUTHKEY` | _(unset)_ | Tailscale pre-auth key. Without it, run `tailscale up` by hand |
-| `SCRIPT_URL` | _(main branch)_ | Where the LXC pulls the script from. Point it at a branch to test |
+| Variable                       | Default               | Description                                                       |
+| ------------------------------ | --------------------- | ----------------------------------------------------------------- |
+| `CTID`                         | _(next free id)_      | Container ID                                                      |
+| `SEMAPHORE_HOSTNAME`           | `semaphore`           | LXC hostname, also the Tailscale node name                        |
+| `SEMAPHORE_VERSION`            | `latest`              | Release tag, e.g. `v2.19.12`                                      |
+| `SEMAPHORE_EDITION`            | `community`           | `standard` picks the licence-gated Pro build instead              |
+| `SEMAPHORE_LISTEN_ADDR`        | `127.0.0.1:3000`      | Split across `config.json`'s `interface` and `port`               |
+| `TEMPLATE`                     | _(newest Alpine)_     | Override the auto-detected LXC template                           |
+| `STORAGE` / `TEMPLATE_STORAGE` | `local-lvm` / `local` | Proxmox storages                                                  |
+| `CORES` / `RAM` / `DISK`       | `2` / `2048` / `12`   | Container sizing (MB / GB)                                        |
+| `BRIDGE`                       | `vmbr0`               | Network bridge                                                    |
+| `LXC_TAG`                      | `semaphore`           | Tag used to recognise the container on re-runs                    |
+| `TS_AUTHKEY`                   | _(unset)_             | Tailscale pre-auth key. Without it, run `tailscale up` by hand    |
+| `SCRIPT_URL`                   | _(main branch)_       | Where the LXC pulls the script from. Point it at a branch to test |
 
 ### What the LXC gets
 
